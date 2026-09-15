@@ -142,6 +142,15 @@ found only by running the SECONDARY engines rather than just the primary one
   the family's contract, and the product works elsewhere) and the README,
   TROUBLESHOOTING and this entry all say not to use it here.
 
+* **A Scraping Browser profile expires in about a day**, after which the
+  endpoint answers HTTP 401 `deny_no_user`. That makes it the best path for a
+  run you are watching and the wrong secret for a scheduled job, so the daily
+  canary prefers a durable `FOODPANDA_PROXY` and reports an expired endpoint
+  as a SKIP with its cause named rather than as a failure. The engine's
+  connect error now names both causes — 500 is a busy profile, 401 is a gone
+  one — because telling a reader to wait for another run when the profile has
+  expired is a wasted afternoon.
+
 ### Known limitations, stated rather than worked around
 
 * **No vendor-page mode.** A `/restaurant/{code}/{slug}` page is where a

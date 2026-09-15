@@ -118,6 +118,13 @@ Both runs took the same three pages of the same listing and returned 143 and
 144 vendors with `status: complete`. If you are doing more than a page or
 two, that is the difference the money buys.
 
+> **The endpoint expires.** A Scraping Browser profile lives about a day;
+> after that it answers HTTP 401 `deny_no_user` and you mint new credentials.
+> So it is the best path for a run you are watching and the wrong thing to
+> put in a scheduled job's secret — a daily canary pointed at one would be
+> red every day from the second, which is worse than no check at all. The
+> canary here prefers a proxy and treats an expired endpoint as a skip.
+
 **What a 2Captcha key does NOT buy here**: a way past the block. See
 [the challenge is Enterprise](#the-challenge-is-recaptcha-enterprise-and-this-repo-cannot-solve-it).
 

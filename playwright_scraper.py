@@ -534,9 +534,14 @@ def _connect_remote(pw, args):
             f"could not connect to --cdp-endpoint "
             f"{_mask_credentials(args.cdp_endpoint)}: "
             f"{_mask_credentials(str(e))}\n"
-            f"A Scraping Browser profile allows ONE live connection at a "
-            f"time, so a 500 here usually means another run still holds this "
-            f"`pid`. Wait for it to finish, or use a different pid."
+            f"TWO causes, and they want opposite responses:\n"
+            f"  HTTP 500  the profile is BUSY. A Scraping Browser profile "
+            f"allows one live connection at a time, so another run still "
+            f"holds this `pid`. Wait for it, or use a different pid.\n"
+            f"  HTTP 401 / deny_no_user  the profile is GONE. These expire "
+            f"after roughly a day, so an endpoint that worked yesterday is "
+            f"expected to fail today — mint new credentials rather than "
+            f"debugging the network."
         ) from None
     # Reuse the remote browser's existing context so its
     # fingerprint/session/proxy settings stay intact.
@@ -548,12 +553,10 @@ def _connect_remote(pw, args):
     # challenges inside the browser: https://2captcha.com/scraper/browser-api/api
     # Tried first when --cdp-endpoint is set; this script's own detect+solve
     # logic still runs as a fallback if the endpoint does not support it.
-    # On THIS site that is not a formality. foodpanda's refusal is
-    # PerimeterX's denial document, and the document renders a real reCAPTCHA
-    # v2 checkbox — `<div class="g-recaptcha" data-sitekey="6Lc…"
-    # data-callback="handleCaptcha">` — so the remote browser's auto-solve
-    # has something it can genuinely clear, and so does this script's own
-    # fallback below.
+    # On THIS site do not expect it to matter. foodpanda's denial document
+    # renders a v2-SHAPED `g-recaptcha` container whose loader is
+    # `recaptcha/enterprise.js`, and nothing in this repo pays for an
+    # enterprise widget. It is left switched on because asking costs nothing.
     #
     # The remote browser's auto-solve is left switched on because it costs
     # nothing to ask, but do not expect it to matter here: the only challenge
