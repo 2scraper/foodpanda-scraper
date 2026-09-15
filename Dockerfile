@@ -1,32 +1,30 @@
 # Builds the Playwright engine (the one the README recommends) into a
-# container with REAL CHROME — see below for why that word is load-bearing.
+# container.
 #
-#   docker build -t vrbo-scraper .
-#   docker run --rm -v "$PWD/out:/out" vrbo-scraper \
-#     --url "https://www.vrbo.com/search?destination=Orlando,%20Florida,%20United%20States%20of%20America" \
-#     --pages 3 --out /out/orlando
+#   docker build -t foodpanda-scraper .
+#   docker run --rm -v "$PWD/out:/out" foodpanda-scraper \
+#     --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \
+#     --pages 3 --out /out/gulberg
 #
 # Pass --proxy/--twocaptcha-key the same way as running locally, or mount a
 # .env at /app/.env — nothing here bakes in a credential, and .dockerignore
-# keeps one out of the build context.
+# keeps one out of the build context. A .env baked into an image is a
+# credential published to everyone who can pull it.
 FROM python:3.12-slim
 
 WORKDIR /app
 
 COPY requirements.txt requirements-playwright.txt ./
 
-# `playwright install chrome`, NOT `playwright install chromium`, and that is
-# the difference between an image that works and one that is refused.
-# Measured on this site from the same address seconds apart: Playwright's
-# bundled Chromium was answered HTTP 429 and Google Chrome HTTP 200 with the
-# full grid. An image built with the bundled browser would be a scraper that
-# cannot fetch its own target — and it would look like a blocked IP rather
-# than a build choice.
+# `playwright install chromium` is enough for this site, unlike one sibling
+# repo where the bundled build is refused and real Chrome is required.
+# Measured 2026-09-15: Playwright's own Chromium was served by ten of the
+# eleven foodpanda country sites.
 #
 # `--with-deps` also pulls Chromium's shared-library dependencies through
 # apt, which are not pip packages and so cannot ride in requirements.txt.
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.txt \
-    && playwright install --with-deps chrome
+    && playwright install --with-deps chromium
 
 # Every module playwright_scraper.py imports, transitively, plus diff_runs.py
 # as a useful companion in the same image. smoke_test.py checks this list
@@ -36,15 +34,22 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.tx
 # `--help` — a broken container that nothing in the repo would have noticed.
 COPY captcha_solver.py env_config.py fingerprint_client.py output_writer.py \
      page_flow.py playwright_scraper.py product_parser.py proxy_pool.py \
-     diff_runs.py ./
+     scraper_api_client.py diff_runs.py ./
 
-# Headful by default everywhere else in this repo; in a container there is no
-# display, so the engine runs headless here. That is a real limitation rather
-# than a preference — the measured discriminator on this site is the browser
-# BUILD rather than the window, which is why installing chrome above is what
-# matters, but a headless run is one more thing a bot manager can key on.
-# Pass --proxy or --cdp-endpoint if this image starts getting refused.
-ENV VRBO_DOCKER=1
+# READ THIS BEFORE FILING A BUG ABOUT THE IMAGE BEING BLOCKED.
+#
+# There is no display in a container, so the engine runs headless here — and
+# headless is the window this site is least generous with. Every measurement
+# in this repo's README was taken with --headful on a desktop; a headless run
+# is one more thing PerimeterX can key on, on a site whose refusal is already
+# a matter of degree.
+#
+# So an image that gets refused where your laptop is not is behaving as
+# expected. The levers, in the order worth trying: raise --delay, pass a
+# residential --proxy (ideally in the site's own country), or point
+# --cdp-endpoint at the 2Captcha Scraping Browser API, which brings its own
+# browser and its own exit.
+ENV FOODPANDA_DOCKER=1
 
 ENTRYPOINT ["python3", "playwright_scraper.py", "--headless"]
 CMD ["--help"]

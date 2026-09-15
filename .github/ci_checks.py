@@ -90,8 +90,9 @@ CREDENTIAL_ALLOWED = (
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 # Contexts in which a 32-hex string is plainly not a key.
 #
-# Deliberately WITHOUT this site's asset hosts. Vrbo serves its images under
-# short hex names (`3a9727ba.jpg`) that never reach 32 characters, and
+# Deliberately WITHOUT this site's asset hosts. foodpanda serves its tile
+# images under `{code}-listing.jpg` on images.deliveryhero.io — four
+# characters, never a 32-hex run — and
 # make_fixtures.py replaces every 24+ character hex run in a committed
 # fixture with REDACTED-HEX before it is written — so the fixtures carry none
 # and an allowlist entry for them would be dead configuration that reads like

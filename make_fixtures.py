@@ -156,7 +156,44 @@ def trim_tiles(html: str, keep: int) -> str:
     end += len("</li>")
     head_end = html.find("</head>")
     head = html[:head_end + 7] if head_end > 0 else ""
-    return head + "<body><ul>" + html[start:end] + "</ul></body></html>"
+    return (head + "<body><ul>" + html[start:end] + "</ul>"
+            + _evidence_scripts(html) + "</body></html>")
+
+
+# The two strings §18 is about, both of which live in the BODY after the grid
+# and would otherwise be trimmed away:
+#
+#   window._pxAppId = 'PX…'        the PerimeterX sensor bootstrap
+#   "PERIMETERX_APP_ID":"…"        the page's own runtime config, whose i18n
+#   "…reCAPTCHA server"            bundle also carries the word "reCAPTCHA"
+#
+# They are on EVERY page foodpanda serves, so either as a marker would report
+# the whole catalogue as blocked. The suite asserts exactly that, and it can
+# only do so if the fixtures still carry them.
+_EVIDENCE_MARKERS = ("window._pxAppId", "PERIMETERX_APP_ID",
+                     "Captcha_Modal_Warning_ErrorMessage")
+
+
+def _evidence_scripts(html: str) -> str:
+    """The script tags carrying §18's evidence, verbatim, or "" if absent."""
+    out = []
+    for marker in _EVIDENCE_MARKERS:
+        at = html.find(marker)
+        if at < 0:
+            continue
+        opening = html.rfind("<script", 0, at)
+        closing = html.find("</script>", at)
+        if opening < 0 or closing < 0:
+            continue
+        block = html[opening:closing + len("</script>")]
+        # The runtime config is ~400 KB; keep the window around the marker
+        # rather than the whole bundle, and keep it as the site wrote it.
+        if len(block) > 40000:
+            lo = max(opening, at - 2000)
+            hi = min(closing, at + 2000)
+            block = "<script>" + html[lo:hi] + "</script>"
+        out.append(block)
+    return "".join(out)
 
 
 # What a slimmed `<head>` must keep. Each entry is evidence some assertion in

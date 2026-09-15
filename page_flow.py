@@ -489,6 +489,17 @@ def _same_listing(current_url: str, candidate: str) -> bool:
     return a.path.rstrip("/") == b.path.rstrip("/")
 
 
+def page_cap_reached(page_num: int) -> bool:
+    """Whether the hard page cap has been hit.
+
+    A backstop, not a policy: the largest listing measured on this site is one
+    the site itself numbered to page 25, and PAGE_CAP sits well above that so
+    a malformed or genuinely enormous listing ends rather than running
+    forever.
+    """
+    return page_num >= PAGE_CAP
+
+
 def comparable(url: str) -> str:
     """A URL reduced to what identifies the page, for dedupe and comparison."""
     return strip_tracking(url)
