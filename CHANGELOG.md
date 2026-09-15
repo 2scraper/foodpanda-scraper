@@ -59,8 +59,10 @@ three engines that must agree.
 
 ### Fixed — found by running it against the live site
 
-Three defects that no amount of reading found, and one inherited from the
-family core. Every one of them was invisible to a green offline suite.
+Five defects that no amount of reading found, two of them inherited from the
+family core. Every one was invisible to a green offline suite, and two were
+found only by running the SECONDARY engines rather than just the primary one
+(§16).
 
 * **A refused page was reported as an exhausted listing.** Page 2 of a
   three-page run was refused on every attempt, fell through to the parse,
@@ -90,6 +92,21 @@ family core. Every one of them was invisible to a green offline suite.
   was given — and the retry budget is non-zero in exactly that case. The
   first refused page of any pool-less run would have died with
   `AttributeError` instead of reporting exit 3.
+* **The two secondary engines retried a block with no pause at all.** The
+  Playwright engine waits `--retry-delay`, doubling; the other two relaunched
+  and went straight back, so a five-attempt run finished in fourteen seconds
+  and was refused every time. On a site whose refusal rate is a direct
+  function of request rate, that spent the entire budget in the one window
+  where it could not work — and it broke the family's "all three engines must
+  agree" rule in the place it matters most.
+* **The pyppeteer engine is refused with its own browser, and that is the
+  browser rather than the driver.** Measured on one URL in one window, arms
+  alternating: pyppeteer driving Playwright's Chromium 148 was served,
+  pyppeteer driving its own bundled Chromium 117 was refused, and Playwright
+  was served. pyppeteer pins a Chromium that is three years stale.
+  `--chromium-path` is the answer, and the requirements file, the README and
+  TROUBLESHOOTING all say so now. Removing pyppeteer's automation flags does
+  not help — it is the version.
 
 ### Fixed — found while pinning fixture values
 

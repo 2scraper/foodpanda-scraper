@@ -2,14 +2,29 @@
 #
 #   pip install -r requirements.txt -r requirements-puppeteer.txt
 #
-# pyppeteer downloads its OWN Chromium on first run. That build has not been
-# measured against foodpanda; Playwright's bundled Chromium HAS been, and was
-# served by ten of the eleven country sites. If this engine is refused where
-# the Playwright one is not, point it at a browser you already have before
-# concluding it is the address:
+# READ THIS BEFORE USING THIS ENGINE ON FOODPANDA.
+#
+# pyppeteer downloads its OWN Chromium on first run, and that build is
+# **REFUSED BY THIS SITE**. Measured 2026-09-15, one URL, one window, arms
+# alternating so the address and the hour fall on all three equally:
+#
+#   pyppeteer + Playwright's Chromium 148   served 2 of 2, full grid
+#   pyppeteer + its own Chromium 117        served 0 of 2, PerimeterX denial
+#   Playwright                              served, full grid
+#
+# It is not the driver and it is not the address — it is the browser.
+# pyppeteer pins Chromium revision 1181205, which reports
+# `Chromium 117.0.5938.0`: three years stale, and a bot manager needs no other
+# signal than that.
+#
+# So this engine needs to be pointed at a browser you already have:
 #
 #   python3 puppeteer_scraper.py --chromium-path "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ...
 #   python3 puppeteer_scraper.py --chromium-path /usr/bin/google-chrome ...
+#
+# Playwright's own download works too, if you have it:
+#
+#   --chromium-path "$HOME/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 #
 # Note: pyppeteer pins pyee<12 and urllib3<2.0, which conflict with playwright
 # and selenium respectively. Use a separate virtualenv for this engine.

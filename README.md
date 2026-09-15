@@ -287,15 +287,35 @@ Three things the code will tell you rather than guess:
 
 | | Playwright | Selenium | pyppeteer | Scraping Browser (CDP) |
 |---|---|---|---|---|
-| Recommended | **yes** | — | — | for volume |
+| Recommended | **yes** | works | needs `--chromium-path` | for volume |
 | `--concurrency` > 1 | yes | no | no | refused (one connection per profile) |
 | Authenticated proxy | yes | **no** | yes | n/a |
 | Authenticated CDP endpoint | yes | **no** | yes | yes |
 | `--fingerprint` | yes | yes | **no** | not applicable |
 
 Every measurement in this README was taken with the **Playwright** engine and
-Playwright's own bundled Chromium — no special channel needed here, unlike a
-sibling repo.
+Playwright's own bundled Chromium — no special channel needed there.
+
+**The pyppeteer engine is refused out of the box on this site, and the reason
+is its browser rather than its driver.** Measured on one URL in one window,
+arms alternating:
+
+| | Served |
+|---|---|
+| pyppeteer + Playwright's Chromium 148 | **2 of 2**, full grid |
+| pyppeteer + its own bundled Chromium 117 | **0 of 2**, HTTP 403 |
+| Playwright | served, full grid |
+
+pyppeteer pins a Chromium that reports `117.0.5938.0` — three years stale in
+September 2026. Point the engine at a browser you already have and it works:
+
+```bash
+python3 puppeteer_scraper.py --chromium-path /usr/bin/google-chrome ...
+```
+
+The Selenium engine does not have this problem, because chromedriver drives
+the Chrome already installed on the machine. It was served first try in a
+live run.
 
 Two Selenium limits are real and are reported loudly rather than
 half-working: `--proxy-server` takes an address with nowhere to put a

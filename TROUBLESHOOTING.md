@@ -267,6 +267,31 @@ engines only.
 
 ---
 
+## The pyppeteer engine is refused where the others are not
+
+Its browser, not its driver. Measured on one URL in one window, arms
+alternating so the address and the hour fall on all three equally:
+
+| | Served |
+|---|---|
+| pyppeteer + Playwright's Chromium 148 | **2 of 2**, full grid |
+| pyppeteer + its own bundled Chromium 117 | **0 of 2**, HTTP 403 |
+| Playwright | served, full grid |
+
+pyppeteer pins Chromium revision 1181205, which reports `117.0.5938.0` —
+three years stale in September 2026, and a bot manager needs no other signal.
+
+```bash
+python3 puppeteer_scraper.py --chromium-path /usr/bin/google-chrome ...
+python3 puppeteer_scraper.py --chromium-path "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ...
+```
+
+Turning off pyppeteer's automation flags does NOT help — `--enable-automation`
+removed, `--disable-blink-features=AutomationControlled` added, and both
+together were each refused on every attempt with the bundled browser.
+
+---
+
 ## Regenerating the offline suite's fixtures
 
 ```
