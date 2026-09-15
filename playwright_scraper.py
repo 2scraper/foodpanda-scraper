@@ -662,21 +662,21 @@ def handle_captcha_if_present(page, args) -> bool:
     against each other rather than short-circuited, because they can disagree
     about the variant and the parameters for one are rejected for the other.
 
-    ON THIS SITE THIS PATH IS LOAD-BEARING, which is unusual for the
-    family. foodpanda's refusal is PerimeterX's denial document and that
-    document renders a reCAPTCHA v2 checkbox with a real site key, so
-    `detect_page_state` reports it as "challenge" rather than "blocked" and a
-    solve is a genuine option rather than a decoration.
+    ON THIS SITE THIS PATH BUYS NOTHING TODAY, and that is measured rather
+    than assumed. foodpanda's refusal is PerimeterX's denial document, and it
+    renders a v2-shaped `g-recaptcha` container whose LOADER is
+    `https://www.google.com/recaptcha/enterprise.js` — measured on four
+    denial documents across two country sites, with zero occurrences of
+    `recaptcha/api.js` on any of them. captcha_solver.py implements v2 and v3
+    and not the enterprise method, so `detect_page_state` reports such a page
+    as "blocked" rather than "challenge", no solve is attempted, and nothing
+    is charged for a token the site would reject (§8: detected != blocking
+    != paying).
 
-    What it still cannot help with is Cloudflare's managed challenge, which
-    is what a client that does not look like a browser gets before it ever
-    reaches the application. That is reported as "blocked", so no solve is
-    attempted and nothing is charged (§8: detected != blocking != paying).
-
-    And the cheaper answer is tried first regardless: the refusal is
-    per-session and clears on a later attempt in a third of navigations, so
-    `--solve-captcha when-blocked` (the default) counts tiles on the spot and
-    the retry budget runs before any money is spent.
+    The path is kept wired up because a bot manager's choice of widget is a
+    configuration rather than a fact, and because the family's rule is that
+    detection stays broad. What actually clears a refusal here is a fresh
+    session and a slower request rate.
     """
     html = _content_when_settled(page)
     if html is None:
@@ -876,11 +876,12 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # — which is what the retry loop above already does, by tearing the
         # browser down and launching a fresh one.
         #
-        # The paid path is reached for state "challenge", which on this site
-        # is a state captures really do produce: the denial document renders
-        # a reCAPTCHA v2 checkbox with a real site key. Bounded by
-        # SOLVES_PER_PAGE so it cannot become a bill, and reached only after
-        # the free re-roll has had its turn.
+        # The paid path is reached for state "challenge", which NOTHING ON
+        # THIS SITE reaches today: the only challenge foodpanda renders is
+        # reCAPTCHA Enterprise, which captcha_solver.py does not implement,
+        # so such a page is classified "blocked" and no solve is attempted or
+        # billed. Bounded by SOLVES_PER_PAGE regardless, so a path that
+        # becomes reachable after a site change cannot become a bill.
         if (page_flow.should_solve(state)
                 and solves_bought < page_flow.SOLVES_PER_PAGE):
             solves_bought += 1
