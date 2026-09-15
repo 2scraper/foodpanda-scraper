@@ -324,6 +324,34 @@ necessary but not sufficient here — the `407` problem above is separate.)
 
 ---
 
+## I turned on `--fingerprint` and now everything is blocked
+
+That is the expected result on this site, and it is measured. Four runs of one
+URL within five minutes:
+
+| Run | Served |
+|---|---|
+| no fingerprint | 48 rows, first attempt |
+| no fingerprint, five minutes later | 48 rows, first attempt |
+| `--fingerprint --fp-country pk` | refused 4 of 4 |
+| `--fingerprint --fp-country de` — matching the exit | refused 4 of 4 |
+
+It is not a country mismatch: the last arm matched the exit exactly. It is
+that a fingerprint describing a Windows machine, injected into the Chromium
+you actually have, contradicts everything it does not cover — real GPU
+strings, fonts, TLS, JS engine behaviour. An honest browser scores better.
+
+**Drop the flag.** If you want a different identity, use `--cdp-endpoint`:
+the Scraping Browser supplies a coherent one, and this scraper deliberately
+refuses to stack a fingerprint on top of it.
+
+The fingerprint client itself is fine and was verified live — fingerprint
+5581439 (PK) came back with its user agent, locale `ur-PK` and timezone
+`Asia/Karachi` all applied correctly. The problem is what the site makes of
+it, not what the API returns.
+
+---
+
 ## The pyppeteer engine is refused where the others are not
 
 Its browser, not its driver. Measured on one URL in one window, arms

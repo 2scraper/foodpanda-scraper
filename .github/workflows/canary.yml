@@ -6,33 +6,34 @@ name: canary
 # throughout. This workflow is the other half: a real run against a real
 # listing URL, so a site-side break is caught here first.
 #
-# THIS CANARY NEEDS A PROXY SECRET, AND SKIPS WITHOUT ONE
-# --------------------------------------------------------
+# THIS CANARY NEEDS A PAID EXIT, AND SKIPS WITHOUT ONE
+# -----------------------------------------------------
 # foodpanda is fronted by PerimeterX, and the refusal is a matter of degree
 # rather than of policy: measured 2026-09-15 from a RESIDENTIAL address with
 # an ordinary headful Chromium, 10 of 30 cold navigations were served and the
-# rest came back with PerimeterX's denial page. A GitHub runner's
-# DATACENTRE address is a worse starting position than that by every measure
-# a bot manager uses, and this repo has NOT measured how much worse.
+# rest came back with PerimeterX's denial page. A GitHub runner's DATACENTRE
+# address is a worse starting position than that by every measure a bot
+# manager uses.
+#
+# PREFER THE SCRAPING BROWSER. Measured the same day, same three pages of the
+# same listing:
+#
+#     unproxied residential   page 3 refused 4 times, 5 attempts, ~7 minutes
+#     --cdp-endpoint          zero refusals, zero retries, 29 seconds
+#
+# and a credentialled PROXY zone could not drive Chromium at all — the
+# gateway never answers 407 to an unauthenticated CONNECT, so every page load
+# died at Chromium's own 30s budget, to every destination. See
+# TROUBLESHOOTING.md. So the endpoint is tried first and the proxy is the
+# fallback.
+#
+#     gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper
+#     gh secret set FOODPANDA_PROXY        --repo 2scraper/foodpanda-scraper   # optional
 #
 # A check that is always red teaches everyone to ignore checks, which is
-# worse than having no check at all. So the live steps are guarded on the
-# secret's presence and the job goes GREEN with a `::notice::` explaining
-# itself when it is absent — §11's rule, and the skip branch was dispatched
-# manually once to confirm it really runs.
-#
-#     gh secret set FOODPANDA_PROXY --repo 2scraper/foodpanda-scraper
-#
-# Prefer an exit in the site's own country: `ap.proxy.2captcha.com` is the
-# regional gateway for the Asian sites this brand operates.
-#
-# The secret is passed through the ENVIRONMENT, which env_config.py already
-# reads for exactly this variable, rather than through a --proxy flag. Two
-# reasons: a credential on a command line is readable by anything that can
-# run `ps`, which is the rule this repo states and should therefore follow in
-# its own CI; and an unset secret arrives as an empty string, which the
-# loader already treats as "not configured", so there is no commented-out
-# line for anyone to forget to uncomment.
+# worse than having no check at all. So the live steps are guarded on a
+# secret being present and the job goes GREEN with a `::notice::` explaining
+# itself when neither is — §11's rule.
 
 on:
   schedule:
@@ -51,34 +52,36 @@ jobs:
     env:
       # `secrets` is not available in a job-level `if`, so presence is tested
       # through the job env and read in each step's condition.
-      HAVE_PROXY: ${{ secrets.FOODPANDA_PROXY != '' }}
+      HAVE_EXIT: ${{ secrets.FOODPANDA_CDP_ENDPOINT != '' || secrets.FOODPANDA_PROXY != '' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Explain the skip
-        if: env.HAVE_PROXY != 'true'
+        if: env.HAVE_EXIT != 'true'
         run: |
           set -e
-          echo "::notice::No FOODPANDA_PROXY secret is set, so the live canary was skipped rather than run and failed. foodpanda refuses a large share of cold navigations even from a residential address (10 of 30 served, measured 2026-09-15); a GitHub runner's datacentre address is a worse starting position and this repo has not measured how much worse. Set the secret to make this canary real."
+          echo "::notice::Neither FOODPANDA_CDP_ENDPOINT nor FOODPANDA_PROXY is set, so the live canary was skipped rather than run and failed. foodpanda refuses a large share of cold navigations even from a residential address (10 of 30 served, measured 2026-09-15), and a runner's datacentre address is worse. Set a secret to make this canary real."
           {
-            echo "### Canary SKIPPED — no proxy secret"
+            echo "### Canary SKIPPED — no paid exit configured"
             echo
             echo "The live run did not happen. Nothing about the site or the parser was tested today."
             echo
-            echo 'Set a residential exit to turn this on:'
+            echo 'Turn it on with the Scraping Browser, which is the measured-best path'
+            echo '(zero refusals and 29s for three pages, against five attempts and ~7 minutes unproxied):'
             echo '```'
-            echo 'gh secret set FOODPANDA_PROXY --repo 2scraper/foodpanda-scraper'
+            echo 'gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper'
             echo '```'
-            echo 'Prefer an exit in the country site you point it at.'
+            echo 'A residential `FOODPANDA_PROXY` also works as a fallback — but check it can'
+            echo 'drive a browser first; see TROUBLESHOOTING.md on the 407 handshake.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-python@v5
-        if: env.HAVE_PROXY == 'true'
+        if: env.HAVE_EXIT == 'true'
         with:
           python-version: "3.12"
 
       - name: Install the client and a browser
-        if: env.HAVE_PROXY == 'true'
+        if: env.HAVE_EXIT == 'true'
         # `chromium` is enough on this site — measured serving ten of the
         # eleven country sites — unlike a sibling repo that needs real
         # Chrome. xvfb is here so the run can be HEADFUL, which this site is
@@ -90,17 +93,18 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb
 
       - name: Scrape a real, known-good area listing
-        if: env.HAVE_PROXY == 'true'
+        if: env.HAVE_EXIT == 'true'
         id: run
         # --pages 3, not 1: with one page pagination is never exercised, and
         # that is exactly how a silent-single-page bug survives (§11). This
         # listing has 24 numbered pages, so three is comfortably inside it.
         #
-        # --delay 45 and --retry-delay 30: the refusal rate on this site is a
-        # direct function of request rate. A three-page run from a warm
-        # address with 8-second backoff had page 2 refused on all five
-        # attempts; the same run with 30-second backoff was served on the
-        # second attempt. Slow is the whole technique here.
+        # --delay 10 --retry-delay 20, which is tight for this site and is
+        # chosen for the exit this canary expects. Through the Scraping
+        # Browser a three-page run took 29 seconds with zero refusals at this
+        # pacing. Through a plain residential address the same three pages
+        # needed 45-second delays and five attempts on page 3 — so if you
+        # configure FOODPANDA_PROXY instead of the endpoint, raise both.
         #
         # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
         # this a non-zero scraper exit aborts the script on THAT line and the
@@ -108,17 +112,23 @@ jobs:
         # stops the step from failing the job; it does not touch errexit.
         continue-on-error: true
         env:
+          # Both are passed through the ENVIRONMENT, which env_config.py
+          # already reads, rather than as flags — a credential on a command
+          # line is readable by anything that can run `ps`. An unset secret
+          # arrives as an empty string, which the loader treats as unset, so
+          # one line is correct with and without each of them.
+          FOODPANDA_CDP_ENDPOINT: ${{ secrets.FOODPANDA_CDP_ENDPOINT }}
           FOODPANDA_PROXY: ${{ secrets.FOODPANDA_PROXY }}
         run: |
           set +e
           xvfb-run -a python3 playwright_scraper.py \
             --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \
-            --pages 3 --delay 45 --retries 4 --retry-delay 30 --headful \
+            --pages 3 --delay 10 --retries 4 --retry-delay 20 --headful \
             --out canary_run --dump-html canary_run.html
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Interpret the exit code
-        if: env.HAVE_PROXY == 'true'
+        if: env.HAVE_EXIT == 'true'
         id: verdict
         # ACCESS CONDITIONS ARE NOT DEFECTS, and on this site that
         # distinction is what decides whether the badge means anything.
@@ -130,7 +140,7 @@ jobs:
             0)
               echo "OK — rows parsed from a live run." ;;
             3)
-              echo "::error::Blocked (exit 3) WITH a residential proxy in play, on every attempt of every page. That is no longer just an access condition — check whether the exit country matches the country site, then read the debug dump: it names PerimeterX or Cloudflare, and those mean different things."
+              echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. That is no longer just an access condition. Read the debug dump: it names PerimeterX or Cloudflare, and those mean different things. If a proxy is configured rather than the Scraping Browser, check it can drive a browser at all — see TROUBLESHOOTING.md on the 407 handshake."
               exit 1 ;;
             6)
               tested=false
@@ -158,7 +168,7 @@ jobs:
       - name: Sanity-check the scraped data
         # Only when the run actually got in: on a blocked run there is no
         # output file, and a missing file would fail for the wrong reason.
-        if: env.HAVE_PROXY == 'true' && steps.verdict.outputs.tested == 'true'
+        if: env.HAVE_EXIT == 'true' && steps.verdict.outputs.tested == 'true'
         # Exit 0 only means "some rows were written". It says nothing about
         # whether the page rendered: a snapshot taken too early still writes
         # rows, just with fields empty. Every floor below is set from a
@@ -301,7 +311,7 @@ jobs:
         # On EVERY run, not only on failure: when this goes red the snapshot
         # is the only thing that says whether the site changed or the code
         # did.
-        if: always() && env.HAVE_PROXY == 'true'
+        if: always() && env.HAVE_EXIT == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: canary-artefacts

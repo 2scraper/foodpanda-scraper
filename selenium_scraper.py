@@ -1196,6 +1196,21 @@ def parse_args():
             "so this run will scroll the one page it has rather than fetch "
             "more. Point --url at /city/{city} or /city/{city}/area/{area} "
             "for real pages.", args.pages)
+    if getattr(args, "fingerprint", False) and not args.cdp_endpoint:
+        # Measured on this site, four runs of one URL within five minutes:
+        # no fingerprint was served 48 rows on the first attempt twice, while
+        # --fp-country pk AND --fp-country de (matching the exit) were each
+        # refused 4 of 4. So it is not the country mismatch §8 warns about —
+        # it is that an injected Windows identity contradicts the real
+        # browser underneath it, and PerimeterX reads that as worse than an
+        # honest browser.
+        logger.warning(
+            "--fingerprint is MEASURED HARMFUL on foodpanda: four runs of one "
+            "URL in five minutes had the two fingerprinted arms refused 4 of "
+            "4 while the two plain arms were served on the first attempt — "
+            "including a fingerprint whose country matched the exit. If you "
+            "want a different identity here, use --cdp-endpoint, which "
+            "supplies a coherent one. Continuing, because you asked.")
     return args
 
 

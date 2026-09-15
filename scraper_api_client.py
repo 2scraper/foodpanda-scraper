@@ -21,10 +21,10 @@ of the eleven country sites answers `curl` with Cloudflare's managed
 challenge — so this client depends entirely on the Scraper API's own
 infrastructure looking like a browser to foodpanda.
 
-NOT LIVE-VERIFIED. No funded 2Captcha key was available while this repo was
-written, so this path is implemented and exercised offline against captured
-pages and has never been run end to end against foodpanda. Said here rather
-than left for a reader to discover from a bill.
+LIVE-VERIFIED 2026-09-15: HTTP 200, 965,862 bytes, and **48 of 48 products
+parsed from a single request** at $0.0005. Compare the sibling repo this
+client came from, where the same path reaches 3 of 50 cards — the difference
+is structural rather than lucky, and it is the server-rendered grid above.
 
 `--wait-element` is cheap insurance rather than the whole job here, since the
 grid is in the first response:

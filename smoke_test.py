@@ -1536,8 +1536,15 @@ def test_readme_claims():
                 "/restaurant/" in text and "403" in text)
     ok &= check("it states the challenge is reCAPTCHA Enterprise",
                 "Enterprise" in text)
-    ok &= check("it says the solve path was NOT live-verified",
-                re.search(r"not (been )?(live-)?verified", text, re.I) is not None)
+    # The claim that matters about the solver is no longer "untested" — the
+    # other three paid paths were run end to end — but that it is
+    # INAPPLICABLE here, and that nobody is charged for it. A README that
+    # quietly dropped this would be selling a key that cannot help.
+    ok &= check("it says the solver is not charged on this site",
+                re.search(r"never charged|not charged|is never charged",
+                          text, re.I) is not None)
+    ok &= check("...and names what it cannot solve",
+                "Enterprise" in text)
     # Compared with thousands separators stripped: the README writes "1,904"
     # because that is the readable form, and a check that forced "1904" would
     # be a check about typography rather than about the claim.

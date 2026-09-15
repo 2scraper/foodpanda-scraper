@@ -555,10 +555,12 @@ def _connect_remote(pw, args):
     # has something it can genuinely clear, and so does this script's own
     # fallback below.
     #
-    # NOT LIVE-VERIFIED: no funded 2Captcha key was available when this was
-    # written, so both paths are exercised offline against the captured
-    # denial page and neither has been run end to end against the site. Said
-    # here rather than left for a reader to discover from a bill (§13).
+    # The remote browser's auto-solve is left switched on because it costs
+    # nothing to ask, but do not expect it to matter here: the only challenge
+    # this site renders is reCAPTCHA Enterprise (see product_parser), and
+    # nothing in this repo pays for one. What the Scraping Browser DOES buy
+    # is measured and large — three pages, 144 vendors, zero refusals, 29
+    # seconds, against five attempts and seven minutes unproxied.
     try:
         cdp_session = context.new_cdp_session(page)
         cdp_session.send("Captcha.setAutoSolve", {"autoSolve": True, "options": [{"type": "*"}]})
@@ -1707,10 +1709,11 @@ def parse_args():
                         "than a decoration. Cloudflare's managed challenge — "
                         "what a non-browser client gets — is reported as "
                         "blocked instead, so no solve is attempted or billed "
-                        "for it. NOT LIVE-VERIFIED: no funded key was "
-                        "available when this shipped, so the path is "
-                        "exercised offline against a captured denial page and "
-                        "has never been run end to end.")
+                        "for it. The solver is therefore INAPPLICABLE on "
+                        "this site rather than untested — there is nothing "
+                        "here for it to solve. The other three 2Captcha "
+                        "paths were run end to end on 2026-09-15 and all "
+                        "work; see the README.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or 0.9 "
                         "— the API only accepts these three). Ignored for v2 "
@@ -1786,6 +1789,21 @@ def parse_args():
             "will scroll the one page it has rather than fetch five. Point "
             "--url at /city/{city} or /city/{city}/area/{area} for real "
             "pages.", args.pages)
+    if getattr(args, "fingerprint", False) and not args.cdp_endpoint:
+        # Measured on this site, four runs of one URL within five minutes:
+        # no fingerprint was served 48 rows on the first attempt twice, while
+        # --fp-country pk AND --fp-country de (matching the exit) were each
+        # refused 4 of 4. So it is not the country mismatch §8 warns about —
+        # it is that an injected Windows identity contradicts the real
+        # browser underneath it, and PerimeterX reads that as worse than an
+        # honest browser.
+        logger.warning(
+            "--fingerprint is MEASURED HARMFUL on foodpanda: four runs of one "
+            "URL in five minutes had the two fingerprinted arms refused 4 of "
+            "4 while the two plain arms were served on the first attempt — "
+            "including a fingerprint whose country matched the exit. If you "
+            "want a different identity here, use --cdp-endpoint, which "
+            "supplies a coherent one. Continuing, because you asked.")
     return args
 
 

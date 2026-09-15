@@ -118,6 +118,32 @@ found only by running the SECONDARY engines rather than just the primary one
   `currency`, and `price_level`. They are the only money a foodpanda tile
   ever carries.
 
+### Verified live, 2026-09-15
+
+* **Scraping Browser (`--cdp-endpoint`)** — three pages of a real area
+  listing, 144 vendors, `status: complete`, **zero refusals and zero
+  retries in 29 seconds**. The same three pages from an unproxied residential
+  address needed five attempts on page 3 and about seven minutes.
+* **Fingerprint client** — fingerprint 5581439 (PK) fetched and applied: the
+  user agent out of `userAgent.userAgent`, locale `ur-PK` from
+  `intl.contentLocale` (the fingerprint's OWN locale, not an invented
+  `en-PK`), timezone `Asia/Karachi` from `intl.timeZone`, plus viewport and
+  device scale factor. Those are the exact four keys §16 records as having
+  been wrong in four sibling repos at once.
+* **Scraper API** — HTTP 200, 965,862 bytes, **48 of 48 products from a
+  single request** at $0.0005. That is a far better result than the sibling
+  repo this client came from (3 of 50 cards) and the reason is structural:
+  foodpanda server-renders its grid, so one shot gets the whole page.
+
+* **`--fingerprint` is measured HARMFUL on this site.** Four runs of one URL
+  within five minutes: no fingerprint served 48 rows on the first attempt
+  twice, `--fp-country pk` was refused 4 of 4, and `--fp-country de` —
+  matching the exit country exactly — was refused 4 of 4 as well. So it is
+  not the country mismatch §8 warns about; it is that an injected Windows
+  identity contradicts the real browser underneath it. The flag stays (it is
+  the family's contract, and the product works elsewhere) and the README,
+  TROUBLESHOOTING and this entry all say not to use it here.
+
 ### Known limitations, stated rather than worked around
 
 * **No vendor-page mode.** A `/restaurant/{code}/{slug}` page is where a
@@ -127,13 +153,11 @@ found only by running the SECONDARY engines rather than just the primary one
   sites. A parser written against markup nobody has seen is a guess with a
   docstring, so the mode is absent rather than broken. Such a URL is refused
   with that reason.
-* **The 2Captcha paths are NOT live-verified.** No funded key was available
-  while this was written, so the solver, the Scraping Browser endpoint and
-  the fingerprint client are implemented and exercised offline and have never
-  been run end to end against this site. This is stated here, in the README
-  and in `.env.example` rather than left for a reader to discover from a bill.
-  Note separately that the solver would not help against the enterprise
-  widget anyway — see above.
+* **The captcha solver is inapplicable on this site**, which is not the
+  same as untested: the only challenge foodpanda renders is reCAPTCHA
+  Enterprise, which this project does not implement, so no solve is ever
+  attempted and no key is ever charged. The other three paid paths WERE run
+  end to end on 2026-09-15 — see "Verified live" below.
 * **foodpanda.co.th is unverified.** It is in the supported host list on the
   brand's own country footprint and was refused on all three probe attempts
   in the measurement window.

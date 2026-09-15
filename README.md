@@ -60,6 +60,36 @@ So the instruments that work here, in order, are `--retries` (each attempt
 launches a fresh browser), `--retry-delay` and `--delay`. Only after those
 does buying an exit help.
 
+### `--fingerprint` makes this site WORSE — do not use it here
+
+Measured on one URL within five minutes, so the hour and the address fall on
+every arm equally:
+
+| Run | Served |
+|---|---|
+| no fingerprint | 48 rows, **first attempt** |
+| no fingerprint, five minutes later | 48 rows, **first attempt** |
+| `--fingerprint --fp-country pk` | **refused 4 of 4** |
+| `--fingerprint --fp-country de` — matching the exit | **refused 4 of 4** |
+
+The last row is what makes this conclusive. A fingerprint whose country
+contradicts the exit is a known mismatch, so the obvious reading of the third
+row is "wrong country" — and the fourth row removes it: a fingerprint that
+matched the exit exactly was refused just the same.
+
+What is left is the mismatch the flag cannot avoid. The fingerprint describes
+a Windows machine; it is injected into whatever Chromium you are running. The
+overrides say one thing while everything they do not cover — the real GPU
+strings, the font stack, the TLS handshake, the JS engine's own behaviour —
+says another, and PerimeterX reads that as worse than an honest browser.
+
+The flag stays because it is part of this family's contract and the 2Captcha
+fingerprint product genuinely works on sites where the local browser is the
+thing being scored. On foodpanda it is a way to get refused. Use
+`--cdp-endpoint` instead, which supplies a coherent identity rather than a
+painted-on one — and which the scraper already refuses to stack a fingerprint
+on top of.
+
 ### Headless is refused — so `--headful` is the default
 
 Unusually for this family, this scraper runs **with a window** unless you ask
@@ -75,9 +105,18 @@ seconds apart so the hour and the address fall on both equally:
 container has no display. That is the reason an image can be refused where
 your laptop is not.
 
-**What the paid products actually buy on this site**: volume from many
-addresses, and an exit in the site's own country. That is what a multi-page
-run runs out of — not access.
+**What the paid products actually buy on this site** — measured, not
+guessed. The Scraping Browser API turns this site from "patience required"
+into "just works":
+
+| | Refusals | Retries | Wall clock |
+|---|---|---|---|
+| Residential address, no proxy | page 3 refused 4 times | 5 attempts | ~7 min |
+| `--cdp-endpoint` (Scraping Browser) | **none** | **none** | **29 s** |
+
+Both runs took the same three pages of the same listing and returned 143 and
+144 vendors with `status: complete`. If you are doing more than a page or
+two, that is the difference the money buys.
 
 **What a 2Captcha key does NOT buy here**: a way past the block. See
 [the challenge is Enterprise](#the-challenge-is-recaptcha-enterprise-and-this-repo-cannot-solve-it).
@@ -384,13 +423,12 @@ key.
 `FOODPANDA_URL` are the four variables the code reads, and a test asserts
 `.env.example` documents exactly those, in both directions.
 
-> **The 2Captcha paths in this repo are implemented and NOT live-verified.**
-> No funded key was available while it was written, so the solver, the
-> Scraping Browser endpoint and the fingerprint client are exercised offline
-> against captured pages and have never been run end to end against this
-> site. Said here rather than left for you to discover from a bill. Note
-> separately that the solver would not help against the enterprise widget
-> anyway.
+> **Three of the four 2Captcha paths were run end to end against this site
+> on 2026-09-15.** The fourth — the captcha solver — is not untested but
+> INAPPLICABLE: the only challenge foodpanda renders is reCAPTCHA Enterprise,
+> which this project does not implement, so there is nothing here to spend a
+> solve on and your key is never charged for one. See
+> [the challenge is Enterprise](#the-challenge-is-recaptcha-enterprise-and-this-repo-cannot-solve-it).
 
 ---
 
