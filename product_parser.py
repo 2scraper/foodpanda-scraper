@@ -514,6 +514,9 @@ CLOUDFLARE_MARKERS: Tuple[str, ...] = (
 #   <div id="px-captcha">
 #     <div class="g-recaptcha" data-sitekey="6Lc…" data-callback="handleCaptcha">
 #
+# Named `BOT_CHALLENGE_MARKERS` because that is what the family calls this
+# set, and `scraper_api_client.py` imports it by that name.
+#
 # So a foodpanda block is a `challenge` rather than a dead end, and the
 # 2Captcha integration in this repo is load-bearing rather than decorative.
 # NOT LIVE-VERIFIED: no funded 2Captcha key was available while this was
@@ -521,7 +524,7 @@ CLOUDFLARE_MARKERS: Tuple[str, ...] = (
 # captured denial page, and has never been run end to end against the site.
 # That is stated here, in the README and in the CHANGELOG rather than left
 # for a reader to discover from a bill (§13, §16).
-SOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
+BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
     'class="g-recaptcha"',
     "data-sitekey",
     "recaptcha/api2/anchor",
@@ -532,7 +535,7 @@ SOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
 # Forward-looking only: a vendor this repo could NOT solve, which would make
 # the page `blocked` rather than `challenge` so nothing is attempted and
 # nothing is charged. None of these has ever been seen on foodpanda.
-UNSOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
+UNBOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
     "hcaptcha.com/captcha",
     "geo.captcha-delivery.com",
     "datadome",
@@ -598,10 +601,10 @@ def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
     """
     text = html or ""
     lowered = text.lower()
-    for marker in UNSOLVABLE_CHALLENGE_MARKERS:
+    for marker in UNBOT_CHALLENGE_MARKERS:
         if marker in lowered:
             return None
-    for marker in SOLVABLE_CHALLENGE_MARKERS:
+    for marker in BOT_CHALLENGE_MARKERS:
         if marker.lower() in lowered:
             return "recaptcha"
     return None
@@ -1034,9 +1037,9 @@ class ResultsRange:
     as a measurement rather than left as an absent function, so the next
     reader does not go looking for a counter that is not there.
 
-    What IS available is the site's own page separators, and a full page is
-    48 tiles on every country site measured. `PAGE_SIZE` below is used only
-    to warn about a THIN page, never to conclude one is complete.
+    What IS available is the site's own page separators, and a page usually
+    holds 48 tiles. `TYPICAL_PAGE_SIZE` below is used only to warn about a
+    THIN page, never to conclude one is complete.
     """
 
     def __init__(self, expected_on_page: Optional[int] = None,
@@ -1045,11 +1048,22 @@ class ResultsRange:
         self.total = total
 
 
-# 48 on foodpanda.pk and 48 on foodpanda.sg, on every full page measured
-# across 26 pages. A page below this is not necessarily short — the last page
-# of a listing is short by definition — so this is a warning threshold and
-# never a completeness test.
-PAGE_SIZE = 48
+# What a full page usually holds. NOT a constant the site guarantees, and the
+# measurement is why: three cold fetches of consecutive pages of one listing
+# returned 48, 48 and 44 tiles, while a scrolled capture of the same listing
+# showed 48 in every one of its 24 labelled segments. So the site batches at
+# 48 and delivers fewer when its own catalogue moves between requests.
+#
+# Used ONLY to describe a page in a log line and to set the thin-page warning
+# below. Nothing decides completeness from it — the last page of any listing
+# is short by definition, and a run that treated "fewer than 48" as failure
+# would fail on every listing's final page.
+TYPICAL_PAGE_SIZE = 48
+
+# The warning threshold, at half the typical page. No ordinary page in any
+# capture or live run has come back below it; a page that does is worth a
+# line in the log even though it is not, on its own, an error.
+THIN_PAGE_FLOOR = TYPICAL_PAGE_SIZE // 2
 
 
 def results_range(html: str) -> ResultsRange:
