@@ -640,10 +640,22 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                "refused one only confirms it.",
                                page_num, state, block_attempt + 1,
                                block_retries)
-            # Always for a local run: a fresh session is the whole point.
-            # Never over --cdp-endpoint, where a Scraping Browser profile
-            # allows one live connection and tearing it down risks
-            # `profile_locked`.
+            # WAIT FIRST. The refusal rate on this site is a direct
+            # function of request rate, so going straight back spends the
+            # whole retry budget in the one window where it cannot work — a
+            # five-attempt run finished in fourteen seconds and was refused
+            # every time, while the run that succeeded used a 30-second base
+            # delay and was served on its fifth attempt. The Playwright
+            # engine has always waited here; these two did not, which is the
+            # kind of disagreement §1 says three engines must not have.
+            pause = args.retry_delay * (block_attempt + 1)
+            logger.info("Waiting %.1fs before the next attempt — on this "
+                        "site the pause is half of what makes a retry work.",
+                        pause)
+            time.sleep(pause)
+            # Then a fresh session, which is the other half. Never over
+            # --cdp-endpoint, where a Scraping Browser profile allows one
+            # live connection and tearing it down risks `profile_locked`.
             if not args.cdp_endpoint:
                 session.relaunch()
             d = _driver(session)

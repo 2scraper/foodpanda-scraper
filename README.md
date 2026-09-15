@@ -120,8 +120,9 @@ one at a time with a real browser** rather than trusted.
 | `foodpanda.la` | Laos | served, 50 |
 | `foodpanda.com.mm` | Myanmar | served, 50 |
 
-Raw results in [`live/host_probe.json`](live/host_probe.json) alongside this
-repo. Bare hosts redirect to their `www.` form and both are accepted.
+Each row is one to three navigations with a real browser; the raw probe
+output is not committed (it is a working artefact, and stale within days).
+Bare hosts redirect to their `www.` form and both are accepted.
 
 The country **is** the host, so there is no `--country` flag to disagree with
 the URL.
