@@ -103,15 +103,16 @@ history needs a decision, not a red check on every push.
 Then the rest of the presentation, in the order that matters:
 
 1. `python3 smoke_test.py` green, and the canary dispatched at least once —
-   including its SKIP branch, which is what runs when no `FOODPANDA_PROXY`
-   secret is set. This canary needs a secret to do real work: foodpanda
-   refuses a large share of cold navigations even from a residential address
-   (10 of 30 served, measured 2026-09-15), and a GitHub runner's datacentre
-   address is a worse starting position that this repo has NOT measured. So
-   without the secret the job goes green with a `::notice::` saying in words
-   that nothing was tested — a check that is always red teaches everyone to
-   ignore checks. With the secret, a block is a failure, because then it
-   means something.
+   including its SKIP branch, which is what runs when no secret is set. That
+   branch WAS dispatched and confirmed green on 2026-09-15.
+
+   The canary is **dispatch-only and has no badge**, deliberately: this repo
+   runs nothing live on a timer. foodpanda refuses a large share of cold
+   navigations even from a residential address (10 of 30 served, measured),
+   and a runner's datacentre address is worse — so a scheduled live check
+   would be noise at best. Set a secret and dispatch it by hand when you want
+   a real site-side check; with a secret in play a block IS a failure,
+   because then it means something.
 2. The repo description, homepage and topics set (see the family notes on
    what those should say).
 3. Only then the row in the org profile README — and check it with an

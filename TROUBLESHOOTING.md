@@ -338,10 +338,10 @@ The engine names both causes because they want opposite responses:
 | HTTP 500 | the profile is BUSY — one live connection per `pid`, and another run holds it | wait, or use a different `pid` |
 | HTTP 401, `deny_no_user` | the profile is GONE | get new credentials |
 
-This is why the daily canary prefers `FOODPANDA_PROXY` and treats an expired
-endpoint as a SKIP rather than a failure: a secret that goes stale in a day
-would make it red every day from the second, and a check that is always red
-teaches everyone to ignore checks.
+This is why the canary treats an expired endpoint as a SKIP rather than a
+failure — and why it is dispatch-only with no schedule and no badge. A secret
+that goes stale in a day would make a scheduled check red every morning from
+the second, and a check that is always red teaches everyone to ignore checks.
 
 ---
 

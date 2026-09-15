@@ -52,8 +52,10 @@ three engines that must agree.
   captures and refuses to write unless each one parses identically to its
   untrimmed original, column for column.
 * **Over 400 offline checks**, a Docker image built and run in CI, and a
-  daily canary that SKIPS with a notice rather than failing when no proxy
-  secret is set.
+  dispatch-only canary that skips with a notice when no secret is set. It
+  has no schedule and no badge: this repo runs nothing live on a timer, and a
+  green badge for a check that is not happening is as unreadable as one that
+  is always red.
 
 ### Fixed — found by running it against the live site
 
@@ -144,9 +146,10 @@ found only by running the SECONDARY engines rather than just the primary one
 
 * **A Scraping Browser profile expires in about a day**, after which the
   endpoint answers HTTP 401 `deny_no_user`. That makes it the best path for a
-  run you are watching and the wrong secret for a scheduled job, so the daily
-  canary prefers a durable `FOODPANDA_PROXY` and reports an expired endpoint
-  as a SKIP with its cause named rather than as a failure. The engine's
+  run you are watching and the wrong secret for anything scheduled. The
+  canary here is dispatch-only so it does not matter in practice, and an
+  expired endpoint is reported as a SKIP with its cause named rather than as
+  a failure. The engine's
   connect error now names both causes — 500 is a busy profile, 401 is a gone
   one — because telling a reader to wait for another run when the profile has
   expired is a wasted afternoon.
