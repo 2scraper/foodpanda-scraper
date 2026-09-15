@@ -267,6 +267,63 @@ engines only.
 
 ---
 
+## Every page load times out through my proxy, but `curl` works fine
+
+The gateway is almost certainly not answering `407`.
+
+Chromium does not send proxy credentials on its first `CONNECT`. It sends an
+unauthenticated one, waits for a `407 Proxy Authentication Required`
+challenge, and only then retries with the credentials. An HTTP client like
+`requests` sends `Proxy-Authorization` PREEMPTIVELY, so it never needs the
+challenge — which is why the same credential can work perfectly from a script
+and hang every browser.
+
+Measured on a real 2Captcha custom-zone credential, 2026-09-15:
+
+| | Result |
+|---|---|
+| `requests` -> foodpanda.pk | HTTP 403 (PerimeterX) in **5s** — the route works |
+| raw `CONNECT` with `Proxy-Authorization` | `HTTP/1.1 200 OK` in **3s** |
+| raw `CONNECT` with NO credentials | **no answer at all**, stalled 35s |
+| Chromium -> example.com | `ERR_TIMED_OUT` at **31s** |
+| Chromium -> foodpanda.pk | `ERR_TIMED_OUT` at **31s** |
+
+Note the fourth row: the browser could not reach `example.com` either, so
+this is nothing to do with the site.
+
+**How to tell it apart from a block**: a block arrives as a PAGE (exit 3, and
+the dump names PerimeterX or Cloudflare). This arrives as `ERR_TIMED_OUT`
+with no document at all, at almost exactly the same number of seconds every
+time, to every destination.
+
+**What to do:**
+
+* **Use IP whitelisting instead of user:pass.** 2Captcha's proxy dashboard
+  will whitelist your address and
+  `/proxy/generate_white_list_connections` then returns one `host:port` per
+  exit with no credentials in them at all. With nothing to authenticate,
+  there is no `407` handshake to stall on. This also happens to be the only
+  way the Selenium engine can use a proxy (see above).
+* Or ask for a gateway/zone that answers `407` on an unauthenticated
+  `CONNECT`.
+* Or skip proxies and use `--cdp-endpoint` — the Scraping Browser API brings
+  its own browser and its own exit.
+
+**A separate trap on the same credential**: check whether the zone rotates
+per request. Measured on the same one — four requests, four different exit
+addresses. A browser pulls dozens of resources for one listing, and it cannot
+do that from a different address each time. 2Captcha pins the exit with a
+`-session-{id}-sessTime-{minutes}` segment in the USERNAME:
+
+```
+http://{user}-zone-custom-region-pk-session-myrun1-sessTime-30:{password}@...
+```
+
+With the session in place, four requests came from one address. (That was
+necessary but not sufficient here — the `407` problem above is separate.)
+
+---
+
 ## The pyppeteer engine is refused where the others are not
 
 Its browser, not its driver. Measured on one URL in one window, arms

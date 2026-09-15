@@ -914,6 +914,25 @@ def test_writers_and_finish_run():
         ok &= check("...and writes no sidecar",
                     not os.path.exists(prefix2 + ".meta.json"))
 
+        # A run that never reached the site must NOT look like an empty
+        # listing. Exit 4 is a statement about the catalogue; a load timeout
+        # is a statement about the run.
+        prefix_to = os.path.join(tmp, "timed_out")
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = finish_run([], prefix_to, "json", allow_empty=False,
+                              blocked=False, stop_reason="page_load_timeout",
+                              pages_requested=3, pages_completed=0,
+                              pages_failed=[1], mode="listing",
+                              source="foodpanda.pk",
+                              start_url="https://www.foodpanda.pk/city/lahore",
+                              final_url="https://www.foodpanda.pk/city/lahore")
+        ok &= check("a run where every load timed out is NOT exit 4",
+                    code != EXIT_NO_PRODUCTS)
+        ok &= check("...it is partial, naming the run rather than the listing",
+                    code == EXIT_PARTIAL)
+        ok &= check("...and still writes no sidecar (nothing was written)",
+                    not os.path.exists(prefix_to + ".meta.json"))
+
         prefix3 = os.path.join(tmp, "empty_ok")
         with contextlib.redirect_stdout(io.StringIO()):
             code = finish_run([], prefix3, "json", allow_empty=False,

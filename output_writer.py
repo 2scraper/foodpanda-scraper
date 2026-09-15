@@ -514,9 +514,28 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
             extra=extra))
 
     if not rows:
-        # Nothing gathered at all: a challenge outranks "empty result",
-        # because it says something stood between the run and the content.
-        return EXIT_BLOCKED if blocked else rc
+        # Nothing gathered at all, and WHY decides the code. Exit 4 is a
+        # statement about the CATALOGUE — "the run finished and this listing
+        # held nothing" — so it must not be handed to a run that never
+        # reached the site.
+        #
+        # Found by a live run through a proxy the browser could not use:
+        # every attempt on page 1 timed out, and the run reported exit 4,
+        # which is indistinguishable from an area with no vendors in it.
+        # That is §8's "blocked != empty != partial" collapsing at the one
+        # point where nothing is written and there is no sidecar to read
+        # instead.
+        if blocked:
+            # A challenge outranks the rest: it says something stood between
+            # the run and the content.
+            return EXIT_BLOCKED
+        if not complete:
+            print(f"[!] Nothing was gathered and the run did not finish "
+                  f"({stop_reason}) — this is a FAILED run, not an empty "
+                  f"listing. No output and no sidecar were written, so the "
+                  f"log above is the only record.")
+            return EXIT_PARTIAL
+        return rc
     if not complete:
         print(f"[!] Partial run: stopped after {pages_completed} of "
               f"{pages_requested} page(s) ({stop_reason}). The output holds "
