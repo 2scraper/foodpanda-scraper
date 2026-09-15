@@ -1,0 +1,348 @@
+name: canary
+
+# tests.yml (deliberately) never touches foodpanda.pk — see its own header
+# for why. That leaves a real gap: a markup change on the site only shows up
+# when a user hits it and files an issue, while the offline badge stays green
+# throughout. This workflow is the other half: a real run against a real
+# listing URL, so a site-side break is caught here first.
+#
+# THIS CANARY NEEDS A PAID EXIT, AND SKIPS WITHOUT ONE
+# -----------------------------------------------------
+# foodpanda is fronted by PerimeterX, and the refusal is a matter of degree
+# rather than of policy: measured 2026-09-15 from a RESIDENTIAL address with
+# an ordinary headful Chromium, 10 of 30 cold navigations were served and the
+# rest came back with PerimeterX's denial page. A GitHub runner's DATACENTRE
+# address is a worse starting position than that by every measure a bot
+# manager uses.
+#
+# WHICH SECRET TO SET, AND WHY IT IS THE PROXY
+# --------------------------------------------
+# The Scraping Browser is measurably the better path for a run you are
+# watching — same three pages of the same listing, same day:
+#
+#     unproxied residential   page 3 refused 4 times, 5 attempts, ~7 minutes
+#     --cdp-endpoint          zero refusals, zero retries, 29 seconds
+#
+# It is the WRONG secret for a scheduled job, and that is not a preference:
+# **a Scraping Browser profile lives about a day.** Pointed at one, this
+# canary would be green once and then answer HTTP 401 `deny_no_user` every
+# morning after — a check that is always red, which teaches everyone to
+# ignore checks and is worse than having no check at all.
+#
+#     gh secret set FOODPANDA_PROXY        --repo 2scraper/foodpanda-scraper  # durable
+#     gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper  # expires daily
+#
+# Both are accepted. If you set the endpoint — for a manual dispatch, say —
+# an expired one is reported as a SKIP with its cause named, not as a
+# failure.
+#
+# Whatever you set, CHECK IT CAN DRIVE A BROWSER before trusting the badge. A
+# credentialled proxy zone that never answers 407 to an unauthenticated
+# CONNECT will hang every page load at Chromium's own 30s budget, to every
+# destination, while `curl` through the same credential works perfectly. See
+# TROUBLESHOOTING.md.
+#
+# A check that is always red teaches everyone to ignore checks, which is
+# worse than having no check at all. So the live steps are guarded on a
+# secret being present and the job goes GREEN with a `::notice::` explaining
+# itself when neither is — §11's rule.
+
+on:
+  schedule:
+    # 06:20 UTC. Off the hour, because everything else in the world runs on
+    # it and a queued runner adds nothing but latency.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # `secrets` is not available in a job-level `if`, so presence is tested
+      # through the job env and read in each step's condition.
+      HAVE_EXIT: ${{ secrets.FOODPANDA_CDP_ENDPOINT != '' || secrets.FOODPANDA_PROXY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Explain the skip
+        if: env.HAVE_EXIT != 'true'
+        run: |
+          set -e
+          echo "::notice::Neither FOODPANDA_CDP_ENDPOINT nor FOODPANDA_PROXY is set, so the live canary was skipped rather than run and failed. foodpanda refuses a large share of cold navigations even from a residential address (10 of 30 served, measured 2026-09-15), and a runner's datacentre address is worse. Set a secret to make this canary real."
+          {
+            echo "### Canary SKIPPED — no paid exit configured"
+            echo
+            echo "The live run did not happen. Nothing about the site or the parser was tested today."
+            echo
+            echo 'Turn it on with a residential proxy, which is the DURABLE secret:'
+            echo '```'
+            echo 'gh secret set FOODPANDA_PROXY --repo 2scraper/foodpanda-scraper'
+            echo '```'
+            echo 'A `FOODPANDA_CDP_ENDPOINT` is accepted too and is the faster path, but a'
+            echo 'Scraping Browser profile expires in about a day — so it suits a manual'
+            echo 'dispatch rather than this daily schedule.'
+            echo
+            echo 'Check whatever you set can drive a browser: see TROUBLESHOOTING.md on the'
+            echo '407 handshake.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-python@v5
+        if: env.HAVE_EXIT == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install the client and a browser
+        if: env.HAVE_EXIT == 'true'
+        # `chromium` is enough on this site — measured serving ten of the
+        # ten country sites — unlike a sibling repo that needs real
+        # Chrome. xvfb is here so the run can be HEADFUL, which this site is
+        # measurably more generous with.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-playwright.txt
+          playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Scrape a real, known-good area listing
+        if: env.HAVE_EXIT == 'true'
+        id: run
+        # --pages 3, not 1: with one page pagination is never exercised, and
+        # that is exactly how a silent-single-page bug survives (§11). This
+        # listing has 24 numbered pages, so three is comfortably inside it.
+        #
+        # --delay 25 --retry-delay 25, chosen for the PROXY, which is the
+        # secret this canary is meant to run on. A residential exit needs
+        # real pacing here: the same three pages at 8-second backoff had page
+        # 2 refused on all five attempts, and at 30 seconds it was served on
+        # the second. Through the Scraping Browser the same run took 29
+        # seconds at a third of this delay — so these numbers are the safe
+        # end, not the fast one, and the job's 25-minute budget covers them.
+        #
+        # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
+        # this a non-zero scraper exit aborts the script on THAT line and the
+        # `echo "exit_code=$?"` below never runs. continue-on-error only
+        # stops the step from failing the job; it does not touch errexit.
+        continue-on-error: true
+        env:
+          # Both are passed through the ENVIRONMENT, which env_config.py
+          # already reads, rather than as flags — a credential on a command
+          # line is readable by anything that can run `ps`. An unset secret
+          # arrives as an empty string, which the loader treats as unset, so
+          # one line is correct with and without each of them.
+          FOODPANDA_CDP_ENDPOINT: ${{ secrets.FOODPANDA_CDP_ENDPOINT }}
+          FOODPANDA_PROXY: ${{ secrets.FOODPANDA_PROXY }}
+        run: |
+          set +e
+          xvfb-run -a python3 playwright_scraper.py \
+            --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \
+            --pages 3 --delay 25 --retries 4 --retry-delay 25 --headful \
+            --out canary_run --dump-html canary_run.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Interpret the exit code
+        if: env.HAVE_EXIT == 'true'
+        id: verdict
+        # ACCESS CONDITIONS ARE NOT DEFECTS, and on this site that
+        # distinction is what decides whether the badge means anything.
+        run: |
+          set -e
+          code="${{ steps.run.outputs.exit_code }}"
+          tested=true
+          case "$code" in
+            0)
+              echo "OK — rows parsed from a live run." ;;
+            3)
+              echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. That is no longer just an access condition. Read the debug dump: it names PerimeterX or Cloudflare, and those mean different things. If a proxy is configured rather than the Scraping Browser, check it can drive a browser at all — see TROUBLESHOOTING.md on the 407 handshake."
+              exit 1 ;;
+            6)
+              tested=false
+              echo "::warning::Partial run (exit 6) — some pages were refused and the sidecar says which. On this site that is the normal failure mode under load rather than a defect, so the badge is not failed; if it repeats every day, raise --delay or spread the run across more exits."
+              {
+                echo "### Canary tested only PART of the run (exit 6)"
+                echo "See \`pages_failed\` and \`stop_reason\` in the sidecar artefact."
+              } >> "$GITHUB_STEP_SUMMARY" ;;
+            5)
+              tested=false
+              echo "::warning::Remote API error (exit 5) — a remote endpoint refused the connection, so nothing was tested. If FOODPANDA_CDP_ENDPOINT is set, the overwhelmingly likely cause is that the Scraping Browser profile EXPIRED: they live about a day and then answer HTTP 401 deny_no_user. That is not a defect and does not fail the badge. Set FOODPANDA_PROXY instead for a scheduled job, or refresh the endpoint."
+              {
+                echo "### Canary did NOT test anything (exit 5)"
+                echo
+                echo 'A remote endpoint refused the connection. If `FOODPANDA_CDP_ENDPOINT` is set,'
+                echo 'the profile has almost certainly expired — they last about a day. Use'
+                echo '`FOODPANDA_PROXY` for a scheduled job; the endpoint suits a manual dispatch.'
+              } >> "$GITHUB_STEP_SUMMARY" ;;
+            4)
+              echo "::error::Ran fine and parsed 0 rows (exit 4) from a listing that holds 48 per page. The tile anchor (li[class*=bds-c-vendor-tile]) has most likely moved — this is exactly the regression this canary exists to catch. The HTML dump in the artefacts tells you."
+              exit 1 ;;
+            2)
+              echo "::error::Bad usage (exit 2) — the workflow's own arguments are wrong, not the site."
+              exit 1 ;;
+            *)
+              echo "::error::Unexpected exit code $code (see the step above for the traceback)."
+              exit 1 ;;
+          esac
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check the scraped data
+        # Only when the run actually got in: on a blocked run there is no
+        # output file, and a missing file would fail for the wrong reason.
+        if: env.HAVE_EXIT == 'true' && steps.verdict.outputs.tested == 'true'
+        # Exit 0 only means "some rows were written". It says nothing about
+        # whether the page rendered: a snapshot taken too early still writes
+        # rows, just with fields empty. Every floor below is set from a
+        # measured figure and deliberately under it, so this fails on a
+        # collapse rather than on normal variation.
+        run: |
+          python3 - <<'EOF'
+          import json, re, sys
+          from pathlib import Path
+
+          PAGES_REQUESTED = 3
+          PER_PAGE = 48          # measured on both country sites
+          # Well under three full pages: a short page or a page refused and
+          # retried cannot trip it, but a collapse can.
+          MIN_ROWS = 90
+
+          rows = json.loads(Path("canary_run.json").read_text())
+          meta = json.loads(Path("canary_run.meta.json").read_text())
+          fail = []
+
+          if len(rows) < MIN_ROWS:
+              fail.append(f"only {len(rows)} rows, expected about "
+                          f"{PAGES_REQUESTED * PER_PAGE} across "
+                          f"{PAGES_REQUESTED} pages")
+
+          if meta.get("status") != "complete":
+              # Not a failure on its own — exit 6 is handled above — but the
+              # count assertion means something different for a partial run.
+              print(f"note: status is {meta.get('status')!r}, "
+                    f"pages_failed={meta.get('pages_failed')}")
+
+          skus = [r.get("sku") for r in rows]
+          if len(set(skus)) != len(skus):
+              fail.append(f"{len(skus) - len(set(skus))} duplicate sku(s) — the "
+                          f"dedupe is not running")
+          bad_sku = [s for s in skus if not re.fullmatch(r"[a-z0-9]{2,12}", s or "")]
+          if bad_sku:
+              fail.append(f"{len(bad_sku)} sku(s) are not a foodpanda vendor "
+                          f"code: {bad_sku[:3]}")
+
+          # THE PAGE/POSITION INVARIANT. `position` restarts at 1 on every
+          # page, so this pair is the only thing that identifies a row's place
+          # in the listing — and a sibling repo shipped 60 of 119 rows
+          # silently sharing one (§18). One line, and it catches that forever.
+          pairs = [(r.get("page"), r.get("position")) for r in rows]
+          if len(set(pairs)) != len(pairs):
+              fail.append(f"{len(pairs) - len(set(pairs))} row(s) share a "
+                          f"(page, position) pair — the page number is not "
+                          f"being threaded into the parse")
+          if len({p for p, _ in pairs}) < 2:
+              fail.append("every row claims the same page — pagination did "
+                          "not happen, which is the silent-single-page "
+                          "failure this canary exists to catch")
+
+          # Measured 100% on every captured and live page, on two country
+          # sites. Anything below these means an anchor has moved.
+          for field, floor in (("title", 1.0), ("sku", 1.0), ("url", 1.0),
+                               ("image_url", 0.95), ("category", 0.90),
+                               ("page", 1.0), ("position", 1.0),
+                               ("page_kind", 1.0), ("source", 1.0),
+                               ("is_open", 1.0)):
+              got = sum(1 for r in rows if r.get(field) not in (None, "", []))
+              if rows and got / len(rows) < floor:
+                  fail.append(f"{field} present on only {got}/{len(rows)} rows "
+                              f"(floor {floor:.0%})")
+
+          # Ratings are out of FIVE here, and 69-78% of tiles carry one. A
+          # rating above 5 means the review count is being read as the rating.
+          bad_rating = [r.get("sku") for r in rows
+                        if r.get("rating") is not None
+                        and not (0 <= r["rating"] <= 5)]
+          if bad_rating:
+              fail.append(f"{len(bad_rating)} rating(s) outside 0-5: "
+                          f"{bad_rating[:3]} — the review count is probably "
+                          f"being read as the rating")
+          rated = sum(1 for r in rows if r.get("rating") is not None)
+          if rows and rated / len(rows) < 0.40:
+              fail.append(f"only {rated}/{len(rows)} rows carry a rating "
+                          f"(measured 69-78% on this listing)")
+
+          # A review count that is the site's CAP must say so, or a monitor
+          # reads 100+ as 100 forever.
+          floored = [r for r in rows if r.get("review_count_is_floor")]
+          for r in floored:
+              if r.get("review_count") not in (100, 500, 1000, 2000, 5000):
+                  fail.append(f"{r.get('sku')} is flagged as a floored review "
+                              f"count but reads {r.get('review_count')}, which "
+                              f"is not one of the site's caps")
+                  break
+
+          # A discount that says "Up to" is a CEILING, and the flag is the
+          # only thing that says so.
+          for r in rows:
+              label = (r.get("discount_label") or "").lower()
+              if label.startswith("up to") and not r.get("discount_is_upper_bound"):
+                  fail.append(f"{r.get('sku')}: {label!r} is not flagged as an "
+                              f"upper bound")
+                  break
+              if label and not label.startswith("up to") \
+                      and r.get("discount_is_upper_bound"):
+                  fail.append(f"{r.get('sku')}: {label!r} is wrongly flagged as "
+                              f"an upper bound")
+                  break
+
+          # An area listing publishes no delivery data at all — that is the
+          # home page's. A populated column here means page_kind is wrong.
+          stray = [r.get("sku") for r in rows
+                   if r.get("page_kind") == "area"
+                   and (r.get("delivery_fee") is not None
+                        or r.get("delivery_time") is not None)]
+          if stray:
+              fail.append(f"{len(stray)} area row(s) carry delivery data, "
+                          f"which only the home page publishes: {stray[:3]}")
+
+          # A currency with no money to describe is a column lying.
+          mislabelled = [r.get("sku") for r in rows
+                         if r.get("currency")
+                         and r.get("delivery_fee") is None
+                         and r.get("min_order") is None]
+          if mislabelled:
+              fail.append(f"{len(mislabelled)} row(s) carry a currency with no "
+                          f"amount: {mislabelled[:3]}")
+
+          # Every row must come from the country site the URL named.
+          sources = {r.get("source") for r in rows}
+          if sources != {"foodpanda.pk"}:
+              fail.append(f"rows claim more than one country site: {sources}")
+
+          if fail:
+              print("CANARY FAILED:")
+              for f in fail:
+                  print(f"  - {f}")
+              sys.exit(1)
+          print(f"OK: {len(rows)} rows across pages "
+                f"{sorted({p for p, _ in pairs})}, "
+                f"{rated}/{len(rows)} rated, status {meta.get('status')!r}")
+          EOF
+
+      - name: Upload what the run actually saw
+        # On EVERY run, not only on failure: when this goes red the snapshot
+        # is the only thing that says whether the site changed or the code
+        # did.
+        if: always() && env.HAVE_EXIT == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-artefacts
+          path: |
+            canary_run.json
+            canary_run.csv
+            canary_run.meta.json
+            canary_run.html*
+            *_debug.html
+            *_debug.png
+          if-no-files-found: ignore
+          retention-days: 14

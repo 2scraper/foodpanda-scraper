@@ -1,0 +1,35 @@
+# Puppeteer engine, via pyppeteer.
+#
+#   pip install -r requirements.txt -r requirements-puppeteer.txt
+#
+# READ THIS BEFORE USING THIS ENGINE ON FOODPANDA.
+#
+# pyppeteer downloads its OWN Chromium on first run, and that build is
+# **REFUSED BY THIS SITE**. Measured 2026-09-15, one URL, one window, arms
+# alternating so the address and the hour fall on all three equally:
+#
+#   pyppeteer + Playwright's Chromium 148   served 2 of 2, full grid
+#   pyppeteer + its own Chromium 117        served 0 of 2, PerimeterX denial
+#   Playwright                              served 2 of 2, full grid
+#
+# It is not the driver and it is not the address — it is the browser.
+# pyppeteer pins Chromium revision 1181205, which reports
+# `Chromium 117.0.5938.0`: three years stale, and a bot manager needs no other
+# signal than that.
+#
+# So this engine needs to be pointed at a browser you already have:
+#
+#   python3 puppeteer_scraper.py --chromium-path "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ...
+#   python3 puppeteer_scraper.py --chromium-path /usr/bin/google-chrome ...
+#
+# Playwright's own download works too, if you have it:
+#
+#   --chromium-path "$HOME/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+#
+# Note: pyppeteer pins pyee<12 and urllib3<2.0, which conflict with playwright
+# and selenium respectively. Use a separate virtualenv for this engine.
+#
+# pyppeteer is also effectively unmaintained and its own README points at
+# Playwright. It exists here so the family has three drivers behind one row
+# schema, not because it is the better choice.
+pyppeteer>=1.0.2

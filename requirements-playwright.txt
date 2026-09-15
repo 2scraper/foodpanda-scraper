@@ -1,0 +1,14 @@
+# The recommended engine, and the one every measurement in this repo was made
+# with. After installing, fetch the browser:
+#
+#   pip install -r requirements.txt -r requirements-playwright.txt
+#   playwright install chromium
+#
+# `chromium` is enough here, unlike one sibling repo where the bundled build
+# is refused and real Chrome is required. Playwright's own Chromium, run with
+# --headful, was served by foodpanda.pk, .sg, .my, .ph, .com.tw, .hk, .com.bd,
+# .com.kh, .la and .com.mm on 2026-09-15.
+#
+# WHAT DOES matter on this site is the WINDOW, not the build: pass --headful.
+# See the README's "Headless is refused" for the measurement.
+playwright>=1.40.0
