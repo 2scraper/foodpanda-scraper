@@ -11,7 +11,7 @@
 Scrapes **foodpanda vendor listings** — every restaurant and shop tile the
 site puts on a city, area or home page, with its rating, review count,
 cuisines, deal labels, delivery data and whether it is open right now. JSON
-and CSV, one row per vendor, the same schema across all eleven country sites.
+and CSV, one row per vendor, the same schema across all ten country sites.
 
 Four ways to fetch: **Playwright** (recommended), **Selenium**, **pyppeteer**,
 or a remote browser over **CDP** — the 2Captcha Scraping Browser API, or any
@@ -41,7 +41,7 @@ proxy, no key and no account. See [sample_output.json](sample_output.json).
 ## Do I need to buy anything?
 
 **No, and that is measured.** A plain headful Chromium on a residential
-address was served by **ten of the eleven country sites** on 2026-09-15, and
+address was served by **ten of the ten country sites** on 2026-09-15, and
 a three-page run of a real area listing returned 143 vendors with
 `status: complete`.
 
@@ -139,7 +139,7 @@ Refused, each **with the reason**:
 | `/city`, `/city/{city}/area` | Directories of links, not listings of vendors — warned about, and the run honestly reports 0 rows |
 | `foodpanda.com` | The brand's global landing page: a country picker with no vendor tiles and no `/city` tree |
 
-### The eleven country sites
+### The ten country sites
 
 Taken from the brand's own country footprint — foodpanda publishes no
 cross-country `hreflang` set, checked on three captures — and then **probed
@@ -150,7 +150,6 @@ one at a time with a real browser** rather than trusted.
 | `foodpanda.pk` | Pakistan | served, 62 vendor links on the home page |
 | `foodpanda.sg` | Singapore | served, 67 |
 | `foodpanda.my` | Malaysia | served, 83 |
-| `foodpanda.co.th` | Thailand | **refused on all three attempts** — unverified |
 | `foodpanda.ph` | Philippines | served, 56 |
 | `foodpanda.com.tw` | Taiwan | served, 75 |
 | `foodpanda.hk` | Hong Kong | served, 60 |
@@ -158,6 +157,13 @@ one at a time with a real browser** rather than trusted.
 | `foodpanda.com.kh` | Cambodia | served, 47 |
 | `foodpanda.la` | Laos | served, 50 |
 | `foodpanda.com.mm` | Myanmar | served, 50 |
+
+**`foodpanda.co.th` was dropped**, and it is the most surprising thing this
+repo found. It answers HTTP 200 and redirects to **robinhood.co.th** — a
+different company — with zero vendor tiles, zero `deliveryhero` references
+and zero `/restaurant/` links on it. foodpanda has left Thailand. The scraper
+refuses that host with that reason rather than reporting a block, because a
+block would send you looking for a proxy problem that does not exist.
 
 Each row is one to three navigations with a real browser; the raw probe
 output is not committed (it is a working artefact, and stale within days).
@@ -250,9 +256,10 @@ no widget at all.
 ### Cloudflare — `Just a moment...`
 
 What a client that does not look like a browser gets, **before it ever
-reaches the application**. Measured with `curl` against all eleven country
-sites: every one returned HTTP 403 and this document, while a real browser on
-the same address was served normally seconds later.
+reaches the application**. Measured with `curl` against all eleven hosts
+this repo probed (the ten storefronts and foodpanda.com): every one returned
+HTTP 403 and this document, while a real browser on the same address was
+served normally seconds later.
 
 If you see this from a browser engine, something has stripped the context —
 that is not a proxy problem and a proxy will not fix it.

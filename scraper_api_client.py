@@ -17,7 +17,7 @@ would, which is the opposite of a sibling repo where this path reaches 3 of
 
 What a browser still buys is the thing this site actually gates on: getting
 served at all. A plain HTTP request never reaches the application — every one
-of the eleven country sites answers `curl` with Cloudflare's managed
+of the ten country sites answers `curl` with Cloudflare's managed
 challenge — so this client depends entirely on the Scraper API's own
 infrastructure looking like a browser to foodpanda.
 

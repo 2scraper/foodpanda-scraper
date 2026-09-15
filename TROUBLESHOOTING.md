@@ -81,7 +81,7 @@ This is **Cloudflare's managed challenge**, and it means something different
 from the section above: your client did not look like a browser at all, so it
 never reached the application.
 
-Measured with `curl` against all eleven country sites: every one returned
+Measured with `curl` against all ten country sites: every one returned
 HTTP 403 and this document, while a real browser on the same address was
 served normally seconds later.
 

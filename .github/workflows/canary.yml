@@ -83,7 +83,7 @@ jobs:
       - name: Install the client and a browser
         if: env.HAVE_EXIT == 'true'
         # `chromium` is enough on this site — measured serving ten of the
-        # eleven country sites — unlike a sibling repo that needs real
+        # ten country sites — unlike a sibling repo that needs real
         # Chrome. xvfb is here so the run can be HEADFUL, which this site is
         # measurably more generous with.
         run: |

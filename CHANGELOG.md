@@ -38,11 +38,9 @@ three engines that must agree.
 * **Three engines** — Playwright (primary), pyppeteer and Selenium, agreeing
   on exit codes, run status, flags and named constants, with the offline
   suite asserting that they do.
-* **Eleven country sites**, ten of them verified live on 2026-09-15:
+* **Ten country sites, every one verified live** on 2026-09-15:
   foodpanda.pk, .sg, .my, .ph, .com.tw, .hk, .com.bd, .com.kh, .la and
-  .com.mm. foodpanda.co.th is supported and was refused on all three probe
-  attempts in that window, so it is listed as unverified rather than as
-  working.
+  .com.mm.
 * **Real pagination.** The site publishes `?page=N` links between batches
   itself, and a cold fetch of `?page=2` returned 48 tiles sharing no vendor
   code with page 1 — so pages are fetched independently and `--concurrency`
@@ -158,8 +156,13 @@ found only by running the SECONDARY engines rather than just the primary one
   Enterprise, which this project does not implement, so no solve is ever
   attempted and no key is ever charged. The other three paid paths WERE run
   end to end on 2026-09-15 — see "Verified live" below.
-* **foodpanda.co.th is unverified.** It is in the supported host list on the
-  brand's own country footprint and was refused on all three probe attempts
-  in the measurement window.
+* **foodpanda.co.th is NOT a foodpanda site and is refused with that
+  reason.** Measured 2026-09-15 through the Scraping Browser: it answers
+  HTTP 200 and redirects to **robinhood.co.th**, a different company, with
+  zero vendor tiles, zero `deliveryhero` references and zero `/restaurant/`
+  links. foodpanda has left Thailand. Left in `HOSTS` it would have fetched a
+  competitor's page, classified it `blocked` — correctly, it is not built out
+  of foodpanda's assets — and reported exit 3, sending the reader after a
+  proxy problem that does not exist (§5's `mediamarkt.lu` case).
 
 [0.1.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.1.0

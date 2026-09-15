@@ -70,6 +70,13 @@ SOURCES = {
                          "https://www.foodpanda.sg/city/singapore", 6),
     "LISTING_PK_HOME":  ("fp_pk_home.html",
                          "https://www.foodpanda.pk/", 4),
+    # A THIRD country, and it earns its place rather than padding the set:
+    # Hong Kong writes deal labels in two currency forms on ONE page —
+    # `15% off HK$ 100` (unambiguous) beside `$120 off $150: pandadeal` (a
+    # bare `$`, which means HKD here and never USD). That pair is what the
+    # host-aware bare-dollar rule exists for.
+    "LISTING_HK_CITY":  ("fp_hk_city_hongkong.html",
+                         "https://www.foodpanda.hk/city/hong-kong", 6),
 }
 
 # A page the site serves that holds NO vendor tiles: the /city directory. It

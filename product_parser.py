@@ -81,7 +81,6 @@ logger = logging.getLogger("product_parser")
 HOSTS: Tuple[str, ...] = (
     "foodpanda.sg",
     "foodpanda.my",
-    "foodpanda.co.th",
     "foodpanda.ph",
     "foodpanda.com.tw",
     "foodpanda.hk",
@@ -97,7 +96,6 @@ HOSTS: Tuple[str, ...] = (
 COUNTRY_BY_HOST: Dict[str, str] = {
     "foodpanda.sg": "Singapore",
     "foodpanda.my": "Malaysia",
-    "foodpanda.co.th": "Thailand",
     "foodpanda.ph": "Philippines",
     "foodpanda.com.tw": "Taiwan",
     "foodpanda.hk": "Hong Kong",
@@ -113,10 +111,28 @@ COUNTRY_BY_HOST: Dict[str, str] = {
 # HTTP 200, and it holds no vendor tiles and no /city tree at all — it is a
 # country picker. Refusing it as "not a foodpanda site" would be a lie.
 REFUSED_HOSTS: Dict[str, str] = {
+    # NOT a foodpanda storefront any more, and this is the most surprising
+    # entry in this file. Measured 2026-09-15: both
+    # https://www.foodpanda.co.th/ and .../city/bangkok answer HTTP 200 and
+    # end up at https://www.robinhood.co.th/?shortlink=foodpanda&… — a Thai
+    # page belonging to a DIFFERENT COMPANY, with zero vendor tiles, zero
+    # deliveryhero references and zero /restaurant/ links. foodpanda has left
+    # Thailand and the domain now hands its traffic to a competitor.
+    #
+    # Refused with the reason rather than left in HOSTS, because a run
+    # against it would fetch Robinhood, classify it `blocked` (correctly — it
+    # is not built out of foodpanda's assets) and report exit 3, sending the
+    # reader to look for a proxy problem that does not exist (§5).
+    "foodpanda.co.th": (
+        "foodpanda.co.th no longer serves foodpanda. Measured 2026-09-15: it "
+        "answers HTTP 200 and redirects to robinhood.co.th — a different "
+        "company — with no vendor tiles on it at all. foodpanda has left "
+        "Thailand. There is nothing here for this scraper to read"
+    ),
     "foodpanda.com": (
         "foodpanda.com is the brand's global landing page, not a storefront: "
         "it serves a country picker with no vendor tiles and no /city tree. "
-        "Pick a country site — foodpanda.pk, foodpanda.sg, foodpanda.co.th "
+        "Pick a country site — foodpanda.pk, foodpanda.sg, foodpanda.my "
         "and the rest are listed in the README"
     ),
 }
@@ -127,7 +143,7 @@ def site_host(url: str) -> Optional[str]:
 
     Matches with or without `www.`, because §5's lesson from a sibling repo
     is that a URL rebuilt as `https://www.{host}{path}` never matches the
-    page's own on a site that answers bare. All eleven foodpanda country
+    page's own on a site that answers bare. All ten foodpanda country
     sites were probed both ways; see `live/host_probe.json`.
     """
     netloc = urlsplit(url).netloc.lower().split("@")[-1].split(":")[0]
@@ -475,16 +491,41 @@ def int_in(text: str) -> Optional[int]:
     return int(value) if value is not None else None
 
 
-def currency_in(text: str) -> Optional[str]:
+# What a BARE `$` means on each country site. §4 ranks a bare symbol as the
+# weakest evidence there is — "`$` reads as USD because that is what it means
+# on a US site, and nothing better is available" — but here something better
+# IS available: the hostname. None of foodpanda's ten country sites is
+# American, so USD would be wrong everywhere this could fire.
+#
+# Measured on a live Hong Kong listing, which carries both forms on one page:
+# `15% off HK$ 100` (unambiguous) beside `$120 off $150: pandadeal` (bare).
+BARE_DOLLAR_BY_HOST: Dict[str, str] = {
+    "foodpanda.hk": "HKD",
+    "foodpanda.sg": "SGD",
+    "foodpanda.com.tw": "TWD",
+}
+
+
+def currency_in(text: str, url: str = "") -> Optional[str]:
     """The currency a deal label's amount is written in, or None.
 
-    Longest symbol first. Returns None rather than a defaulted currency when
-    the label states no symbol — §8, a missing currency is null.
+    Longest symbol first, so a prefix is not swallowed by the bare symbol it
+    contains — `HK$` must not read as `$`. Returns None rather than a
+    defaulted currency when the label states no symbol at all (§8: a missing
+    currency is null).
+
+    `url` resolves a BARE `$` through the country site, which is a fact about
+    the page rather than a guess about the symbol. Without it the bare form
+    falls back to the table's own answer.
     """
     if not text:
         return None
     for symbol, code in CURRENCY_SYMBOLS:
         if symbol in text:
+            if symbol == "$" and url:
+                host = site_host(url)
+                if host in BARE_DOLLAR_BY_HOST:
+                    return BARE_DOLLAR_BY_HOST[host]
             return code
     return None
 
@@ -519,7 +560,7 @@ BLOCK_MARKERS: Tuple[str, ...] = (
 # The OTHER refusal, and it is a different vendor: a request that does not
 # look like a browser at all never reaches PerimeterX, because Cloudflare
 # answers first with a managed challenge. Measured with curl against all
-# eleven country sites — every one of them returned HTTP 403 and this
+# ten country sites — every one of them returned HTTP 403 and this
 # document, while a real browser on the same address was served normally.
 CLOUDFLARE_MARKERS: Tuple[str, ...] = (
     "challenges.cloudflare.com",
@@ -841,9 +882,9 @@ def _tags(tile) -> List[str]:
 _FREE_DELIVERY_RE = re.compile(r"^free\s+delivery$", re.I)
 
 
-def _discount(tags: List[str]) -> Tuple[Optional[float], Optional[str],
-                                        Optional[bool], Optional[float],
-                                        Optional[str]]:
+def _discount(tags: List[str], url: str = "") -> Tuple[
+        Optional[float], Optional[str], Optional[bool], Optional[float],
+        Optional[str]]:
     """(discount_pct, discount_label, is_upper_bound, min_order, currency).
 
     Reads the FIRST label that states a percentage, and keeps three things a
@@ -869,7 +910,7 @@ def _discount(tags: List[str]) -> Tuple[Optional[float], Optional[str],
         pct = _normalize_amount(match.group("pct"))
         upper = bool(match.group("upper"))
         remainder = label[match.end():]
-        currency = currency_in(remainder)
+        currency = currency_in(remainder, url)
         amount = None
         if currency:
             amount_match = re.search(_AMOUNT, remainder)
@@ -946,7 +987,7 @@ def _info_rows(tile) -> List[Tuple[str, str]]:
     return out
 
 
-def _classify_row(label: str, text: str) -> str:
+def _classify_row(label: str, text: str, url: str = "") -> str:
     """Which KIND of info row this is: cuisines, time, fee, level or other."""
     if _PRICE_LEVEL_RE.match(text):
         return "price_level"
@@ -954,7 +995,7 @@ def _classify_row(label: str, text: str) -> str:
         return "price_level"
     if _DURATION_RE.search(text) or _LABEL_DELIVERY_TIME in label:
         return "delivery_time"
-    if currency_in(text) and re.search(_AMOUNT, text):
+    if currency_in(text, url) and re.search(_AMOUNT, text):
         return "delivery_fee"
     if _LABEL_DELIVERY_FEE in label:
         # A fee row with no amount on it — "Free for first order" — which is a
@@ -965,7 +1006,7 @@ def _classify_row(label: str, text: str) -> str:
     return "other"
 
 
-def _tile_info(tile):
+def _tile_info(tile, url: str = ""):
     """(cuisines, delivery_time, delivery_fee, fee_currency, price_level, notes).
 
     A SEO listing tile publishes only the cuisines; a home-page tile
@@ -981,14 +1022,14 @@ def _tile_info(tile):
     for label, text in _info_rows(tile):
         if not text:
             continue
-        kind = _classify_row(label, text)
+        kind = _classify_row(label, text, url)
         if kind == "cuisines":
             cuisines = [part.strip() for part in re.split(r"[,·•]", text)
                         if part.strip()]
         elif kind == "delivery_time" and delivery_time is None:
             delivery_time = text
         elif kind == "delivery_fee" and delivery_fee is None:
-            fee_currency = currency_in(text)
+            fee_currency = currency_in(text, url)
             match = re.search(_AMOUNT, text)
             delivery_fee = _normalize_amount(match.group(0)) if match else None
         elif kind == "price_level" and price_level is None:
@@ -1003,7 +1044,7 @@ def _tile_info(tile):
     # branch above has already claimed the other four.
     if not cuisines:
         unclaimed = [text for label, text in _info_rows(tile)
-                     if text and _classify_row(label, text) == "other"]
+                     if text and _classify_row(label, text, url) == "other"]
         if unclaimed:
             cuisines = [part.strip() for part in re.split(r"[,·•]", unclaimed[0])
                         if part.strip()]
@@ -1073,10 +1114,10 @@ def parse_products(html: str, url: str, page: int = 1,
 
         rating, review_count, count_is_floor = _rating(tile)
         tags = _tags(tile)
-        pct, label, upper, min_order, min_currency = _discount(tags)
+        pct, label, upper, min_order, min_currency = _discount(tags, url)
         is_open, opens_at = _closed(tile)
         (cuisines, delivery_time, delivery_fee, fee_currency,
-         price_level, info_notes) = _tile_info(tile)
+         price_level, info_notes) = _tile_info(tile, url)
 
         rows.append(Product(
             source=source,

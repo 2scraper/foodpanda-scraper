@@ -151,7 +151,7 @@ with open(_FIXTURE_PATH, encoding="utf-8") as _f:
     FIXTURES = json.load(_f)
 
 LISTING_FIXTURES = ("LISTING_PK_CITY", "LISTING_PK_AREA2", "LISTING_SG_CITY",
-                    "LISTING_PK_HOME")
+                    "LISTING_PK_HOME", "LISTING_HK_CITY")
 BLOCK_FIXTURES = ("BLOCK_PX_RECAPTCHA", "BLOCK_PX_RECAPTCHA_SG",
                   "BLOCK_PX_PLAIN", "BLOCK_CLOUDFLARE")
 INDEX_FIXTURES = ("INDEX_PK_CITY", "INDEX_PK_AREA")
@@ -211,6 +211,30 @@ def test_numbers_and_currencies():
     # §8: a missing currency is null, never a defaulted one.
     ok &= check("no symbol -> None", currency_in("Free delivery") is None)
     ok &= check("empty -> None", currency_in("") is None)
+
+    # A BARE `$` resolves through the country site, which is a fact about the
+    # page rather than a guess about the symbol. None of foodpanda's ten
+    # sites is American, so USD would be wrong everywhere this can fire.
+    # Measured on a live Hong Kong listing carrying BOTH forms on one page:
+    # `15% off HK$ 100` beside `$120 off $150: pandadeal`.
+    hk = "https://www.foodpanda.hk/city/hong-kong"
+    sg = "https://www.foodpanda.sg/city/singapore"
+    tw = "https://www.foodpanda.com.tw/city/taipei-city"
+    ok &= check("bare $ on foodpanda.hk -> HKD, not USD",
+                currency_in("$120 off $150", hk) == "HKD")
+    ok &= check("bare $ on foodpanda.sg -> SGD, not USD",
+                currency_in("20% off $15", sg) == "SGD")
+    ok &= check("bare $ on foodpanda.com.tw -> TWD, not USD",
+                currency_in("$60 off", tw) == "TWD")
+    ok &= check("an explicit HK$ is still HKD",
+                currency_in("15% off HK$ 100", hk) == "HKD")
+    ok &= check("an explicit S$ is still SGD",
+                currency_in("15% off S$ 30", sg) == "SGD")
+    ok &= check("a host with no rule keeps the symbol's own answer",
+                currency_in("$150", "https://www.foodpanda.pk/city/lahore")
+                == "USD")
+    ok &= check("no url falls back to the symbol's own answer",
+                currency_in("$150") == "USD")
     return ok
 
 
@@ -306,6 +330,25 @@ def test_values_on_real_fixtures():
         ok &= check("an unclaimed info row is kept verbatim",
                     "Free for first order" in suadish.info_notes)
 
+    # THE THIRD COUNTRY. Hong Kong is here because it writes deal labels in
+    # two currency forms on one page, which is what the host-aware bare
+    # dollar exists for.
+    hk_rows = rows_of("LISTING_HK_CITY")
+    ok &= check("HK city listing parses 6 tiles", len(hk_rows) == 6)
+    priced_hk = [r for r in hk_rows if r.min_order is not None]
+    ok &= check("an HK$ minimum spend is read as HKD",
+                bool(priced_hk)
+                and all(r.min_order_currency == "HKD" for r in priced_hk))
+    ok &= check("...and never as USD",
+                all(r.currency != "USD" for r in hk_rows))
+    # THE INVARIANT the canary also asserts: a currency with no amount beside
+    # it is a column describing nothing.
+    ok &= check("no HK row carries a currency with no amount",
+                not [r for r in hk_rows if r.currency
+                     and r.delivery_fee is None and r.min_order is None])
+    ok &= check("every HK row has a name and an image",
+                all(r.title and r.image_url for r in hk_rows))
+
     # page_kind must differ between the three listing kinds, because three
     # columns are populated on exactly one of them.
     ok &= check("city rows say page_kind='city'",
@@ -344,7 +387,16 @@ def test_urls_and_hosts():
     group("URLs, hosts and what is refused")
     ok = True
 
-    ok &= check("eleven country sites are supported", len(HOSTS) == 11)
+    ok &= check("ten country sites are supported", len(HOSTS) == 10)
+    # The one that was dropped, and WHY — a plain "unsupported" here would be
+    # false and would send a reader hunting for a typo (§5).
+    ok &= check("foodpanda.co.th is not in HOSTS", "foodpanda.co.th" not in HOSTS)
+    why_th = unsupported_reason("https://www.foodpanda.co.th/city/bangkok")
+    ok &= check("...it is refused with a reason", why_th is not None)
+    ok &= check("...naming the company that now answers there",
+                "robinhood" in (why_th or "").lower())
+    ok &= check("...and NOT as 'not a foodpanda site'",
+                "is not a foodpanda" not in (why_th or ""))
     ok &= check("every supported host has a country name",
                 set(COUNTRY_BY_HOST) == set(HOSTS))
     ok &= check("www. and bare hosts both resolve",
@@ -1530,7 +1582,7 @@ def test_readme_claims():
     if not os.path.exists(path):
         return check("README.md exists", False)
     text = open(path, encoding="utf-8").read()
-    ok &= check("the README names the eleven country sites",
+    ok &= check("the README names the ten country sites",
                 all(host in text for host in HOSTS))
     ok &= check("it states that a vendor page is not supported",
                 "/restaurant/" in text and "403" in text)

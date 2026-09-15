@@ -13,7 +13,7 @@ labels and whether it is open right now.
                                       paginates
 
 There is deliberately no `--mode vendor` and no `--country` flag. The country
-is in the URL — foodpanda runs eleven separate country sites and a flag could
+is in the URL — foodpanda runs ten separate country sites and a flag could
 only disagree with the address — and a vendor page could not be captured at
 all: see below.
 
@@ -25,7 +25,7 @@ What is different about foodpanda
 ---------------------------------
 * **Two different refusals, and they want opposite responses.** A client that
   does not look like a browser never reaches the application: Cloudflare
-  answers with a managed challenge, measured on all eleven country sites with
+  answers with a managed challenge, measured on all ten country sites with
   plain HTTP. A client that DOES look like a browser meets PerimeterX, which
   either serves the page or returns a 403 denial document — and that document
   renders a real reCAPTCHA v2 checkbox, so unlike most refusals in this
