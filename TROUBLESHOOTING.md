@@ -276,7 +276,7 @@ alternating so the address and the hour fall on all three equally:
 |---|---|
 | pyppeteer + Playwright's Chromium 148 | **2 of 2**, full grid |
 | pyppeteer + its own bundled Chromium 117 | **0 of 2**, HTTP 403 |
-| Playwright | served, full grid |
+| Playwright | **2 of 2**, full grid |
 
 pyppeteer pins Chromium revision 1181205, which reports `117.0.5938.0` —
 three years stale in September 2026, and a bot manager needs no other signal.

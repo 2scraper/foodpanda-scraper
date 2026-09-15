@@ -10,7 +10,7 @@
 #
 #   pyppeteer + Playwright's Chromium 148   served 2 of 2, full grid
 #   pyppeteer + its own Chromium 117        served 0 of 2, PerimeterX denial
-#   Playwright                              served, full grid
+#   Playwright                              served 2 of 2, full grid
 #
 # It is not the driver and it is not the address — it is the browser.
 # pyppeteer pins Chromium revision 1181205, which reports
