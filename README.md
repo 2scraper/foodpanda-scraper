@@ -2,7 +2,6 @@
 
 [![release](https://img.shields.io/github/v/release/2scraper/foodpanda-scraper?sort=semver)](https://github.com/2scraper/foodpanda-scraper/releases)
 [![tests](https://github.com/2scraper/foodpanda-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/foodpanda-scraper/actions/workflows/tests.yml)
-[![canary](https://github.com/2scraper/foodpanda-scraper/actions/workflows/canary.yml/badge.svg)](https://github.com/2scraper/foodpanda-scraper/actions/workflows/canary.yml)
 [![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue)](pyproject.toml)
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%C2%B7%20Selenium%20%C2%B7%20pyppeteer%20%C2%B7%20CDP-lightgrey)](#engines)
@@ -121,9 +120,9 @@ two, that is the difference the money buys.
 > **The endpoint expires.** A Scraping Browser profile lives about a day;
 > after that it answers HTTP 401 `deny_no_user` and you mint new credentials.
 > So it is the best path for a run you are watching and the wrong thing to
-> put in a scheduled job's secret — a daily canary pointed at one would be
-> red every day from the second, which is worse than no check at all. The
-> canary here prefers a proxy and treats an expired endpoint as a skip.
+> put in anything scheduled. This repo runs nothing live on a timer, so it
+> is not a problem here — but if you wire one up yourself, use a proxy for
+> the schedule and keep the endpoint for runs you are watching.
 
 **What a 2Captcha key does NOT buy here**: a way past the block. See
 [the challenge is Enterprise](#the-challenge-is-recaptcha-enterprise-and-this-repo-cannot-solve-it).
@@ -466,9 +465,13 @@ each engine in **its own virtualenv** (their pins are mutually unsatisfiable),
 builds and runs the Docker image, and greps for committed credentials through
 one implementation that both the workflow and the suite invoke.
 
-The **canary** takes three real pages daily and SKIPS with a notice rather
-than failing when no `FOODPANDA_PROXY` secret is set — a check that is always
-red teaches everyone to ignore checks.
+There is also a **canary** workflow that takes three real pages off the live
+site and asserts the things only a real run can show — that pagination
+happened, that `(page, position)` is unique, that an area row carries no
+delivery data. It is **dispatch-only, with no schedule**: nothing here runs
+live on its own, and there is no badge claiming it does. Point it at a
+`FOODPANDA_CDP_ENDPOINT` or `FOODPANDA_PROXY` secret and run it by hand when
+you want that check; without one it skips with a notice.
 
 ---
 

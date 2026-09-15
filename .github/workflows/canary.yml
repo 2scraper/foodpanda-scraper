@@ -15,28 +15,27 @@ name: canary
 # address is a worse starting position than that by every measure a bot
 # manager uses.
 #
-# WHICH SECRET TO SET, AND WHY IT IS THE PROXY
-# --------------------------------------------
+# WHICH SECRET TO SET IF YOU DISPATCH THIS
+# ----------------------------------------
 # The Scraping Browser is measurably the better path for a run you are
 # watching — same three pages of the same listing, same day:
 #
 #     unproxied residential   page 3 refused 4 times, 5 attempts, ~7 minutes
 #     --cdp-endpoint          zero refusals, zero retries, 29 seconds
 #
-# It is the WRONG secret for a scheduled job, and that is not a preference:
-# **a Scraping Browser profile lives about a day.** Pointed at one, this
-# canary would be green once and then answer HTTP 401 `deny_no_user` every
-# morning after — a check that is always red, which teaches everyone to
-# ignore checks and is worse than having no check at all.
+# Since this only ever runs when someone asks it to, the endpoint's short life
+# is not the problem it would be on a schedule — but know about it anyway:
+# **a Scraping Browser profile lives about a day**, after which it answers
+# HTTP 401 `deny_no_user`.
 #
+#     gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper  # fastest, expires daily
 #     gh secret set FOODPANDA_PROXY        --repo 2scraper/foodpanda-scraper  # durable
-#     gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper  # expires daily
 #
-# Both are accepted. If you set the endpoint — for a manual dispatch, say —
-# an expired one is reported as a SKIP with its cause named, not as a
-# failure.
+# Both are accepted. An expired endpoint is reported as a SKIP with its cause
+# named, not as a failure.
 #
-# Whatever you set, CHECK IT CAN DRIVE A BROWSER before trusting the badge. A
+# Whatever you set, CHECK IT CAN DRIVE A BROWSER before trusting the result.
+# A
 # credentialled proxy zone that never answers 407 to an unauthenticated
 # CONNECT will hang every page load at Chromium's own 30s budget, to every
 # destination, while `curl` through the same credential works perfectly. See
@@ -47,11 +46,17 @@ name: canary
 # secret being present and the job goes GREEN with a `::notice::` explaining
 # itself when neither is — §11's rule.
 
+# ON DEMAND ONLY — there is deliberately no `schedule:` here.
+#
+# This repo's maintainer does not run live checks from CI. With a cron in
+# place the job would fire every morning, take its SKIP branch and go green,
+# and the README would carry a `canary` badge advertising a daily site-side
+# check that never happens. A badge that cannot be read is worse than no
+# badge, which is the same reason §11 refuses a check that is always red.
+#
+# Every assertion below is intact. Set a secret, dispatch it, and it does
+# real work; leave it alone and it costs nothing and promises nothing.
 on:
-  schedule:
-    # 06:20 UTC. Off the hour, because everything else in the world runs on
-    # it and a queued runner adds nothing but latency.
-    - cron: "20 6 * * *"
   workflow_dispatch:
 
 permissions:
