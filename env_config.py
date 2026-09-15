@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 # Keeping this explicit means a typo in .env is reported rather than ignored.
 ENV_KEYS = {
     "TWOCAPTCHA_KEY": "twocaptcha_key",
-    "VRBO_CDP_ENDPOINT": "cdp_endpoint",
-    "VRBO_PROXY": "proxy",
-    "VRBO_URL": "url",
+    "FOODPANDA_CDP_ENDPOINT": "cdp_endpoint",
+    "FOODPANDA_PROXY": "proxy",
+    "FOODPANDA_URL": "url",
 }
 # Deliberately NOT here: an output prefix. `--out` already carries a non-empty
 # default, so `apply()` would never see it as unset and the variable would be
@@ -61,7 +61,7 @@ _PLACEHOLDERS = {
 # This repo's `.env.example` documents the two credentialled URLs the way the
 # vendor documents them, with the parts you fill in written in braces:
 #
-#     ws://{login}-zone-scraping_browser-country-id-pid-{profileId}:{password}@cb.2captcha.com:9222
+#     ws://{login}-zone-scraping_browser-country-pk-pid-{profileId}:{password}@cb.2captcha.com:9222
 #     http://{user}:{password}@ap.proxy.2captcha.com:2334
 #
 # A literal-only check reported both of those as CONFIGURED, so `cp
@@ -142,7 +142,7 @@ def load_env(path=None, override=False):
 def unknown_keys(path=None):
     """Keys present in .env that nothing in this project reads.
 
-    Usually a typo — `TWO_CAPTCHA_KEY`, `VRBO_CDP` — which otherwise fails
+    Usually a typo — `TWO_CAPTCHA_KEY`, `FOODPANDA_CDP` — which otherwise fails
     silently as "the key just isn't being picked up".
     """
     if path is None:

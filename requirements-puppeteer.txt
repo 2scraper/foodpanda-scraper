@@ -1,0 +1,20 @@
+# Puppeteer engine, via pyppeteer.
+#
+#   pip install -r requirements.txt -r requirements-puppeteer.txt
+#
+# pyppeteer downloads its OWN Chromium on first run. That build has not been
+# measured against foodpanda; Playwright's bundled Chromium HAS been, and was
+# served by ten of the eleven country sites. If this engine is refused where
+# the Playwright one is not, point it at a browser you already have before
+# concluding it is the address:
+#
+#   python3 puppeteer_scraper.py --chromium-path "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ...
+#   python3 puppeteer_scraper.py --chromium-path /usr/bin/google-chrome ...
+#
+# Note: pyppeteer pins pyee<12 and urllib3<2.0, which conflict with playwright
+# and selenium respectively. Use a separate virtualenv for this engine.
+#
+# pyppeteer is also effectively unmaintained and its own README points at
+# Playwright. It exists here so the family has three drivers behind one row
+# schema, not because it is the better choice.
+pyppeteer>=1.0.2

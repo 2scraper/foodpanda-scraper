@@ -268,6 +268,26 @@ def city_area_from_url(url: str) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+def listing_page_kind(url: str) -> Optional[str]:
+    """Which KIND of listing this URL is: "home", "city", "area", or None.
+
+    Worth a column of its own (`page_kind`) because the three kinds do not
+    publish the same columns: only the HOME page carries a delivery time, a
+    delivery fee and a price level, since it is the one listing the site
+    renders with a delivery address already in play. A consumer diffing a
+    home run against a city run without this would read those three columns
+    emptying as the vendor changing.
+    """
+    path = urlsplit(url).path or "/"
+    if _HOME_RE.match(path):
+        return "home"
+    if _AREA_RE.match(path):
+        return "area"
+    if _CITY_RE.match(path):
+        return "city"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Pagination — an address the site publishes itself
 # ---------------------------------------------------------------------------
@@ -507,38 +527,61 @@ CLOUDFLARE_MARKERS: Tuple[str, ...] = (
     "Just a moment...",
 )
 
-# What this repo can actually pay to have solved, and on this site the answer
-# is the interesting one: PerimeterX's denial page renders a REAL reCAPTCHA
-# v2 checkbox, and `captcha_solver.py` implements exactly that.
+# What this repo can actually pay to have solved — and on this site the
+# answer is NOTHING, which was learned the expensive way.
+#
+# PerimeterX's denial document renders what LOOKS like a reCAPTCHA v2
+# checkbox:
 #
 #   <div id="px-captcha">
 #     <div class="g-recaptcha" data-sitekey="6Lc…" data-callback="handleCaptcha">
 #
+# and on that evidence alone this repo first classified a refusal as a
+# solvable `challenge`. The LOADER beside it says otherwise, and the loader
+# wins — §8's rule about reconciling captcha detectors rather than
+# short-circuiting them, arriving in a new costume:
+#
+#   <script src="https://www.google.com/recaptcha/enterprise.js?hl=en-US">
+#
+# Measured on four denial documents — foodpanda.pk and foodpanda.sg, a vendor
+# page and a listing page, captures hours apart: 3, 3, 3 and 2 occurrences of
+# `recaptcha/enterprise`, and ZERO occurrences of `recaptcha/api.js` on any of
+# them. The runtime detector agrees independently: `___grecaptcha_cfg` reports
+# `enterprise: true` on the live page.
+#
+# `captcha_solver.py` implements reCAPTCHA v2 and v3 and not the enterprise
+# method, so a solve here would be charged for and would buy a token the site
+# rejects. The set below is therefore EMPTY, and the emptiness is the
+# measurement — not an oversight, and not a placeholder waiting to be filled.
+#
 # Named `BOT_CHALLENGE_MARKERS` because that is what the family calls this
 # set, and `scraper_api_client.py` imports it by that name.
-#
-# So a foodpanda block is a `challenge` rather than a dead end, and the
-# 2Captcha integration in this repo is load-bearing rather than decorative.
-# NOT LIVE-VERIFIED: no funded 2Captcha key was available while this was
-# written, so the solve path is implemented and exercised offline against the
-# captured denial page, and has never been run end to end against the site.
-# That is stated here, in the README and in the CHANGELOG rather than left
-# for a reader to discover from a bill (§13, §16).
-BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
-    'class="g-recaptcha"',
-    "data-sitekey",
-    "recaptcha/api2/anchor",
-    "recaptcha/api2/bframe",
-    "recaptcha/api.js",
-)
+BOT_CHALLENGE_MARKERS: Tuple[str, ...] = ()
 
-# Forward-looking only: a vendor this repo could NOT solve, which would make
-# the page `blocked` rather than `challenge` so nothing is attempted and
-# nothing is charged. None of these has ever been seen on foodpanda.
-UNBOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
+# What a refusal on this site actually renders, and why no solve is
+# attempted for it. Checked BEFORE anything else, so a page carrying both the
+# v2-shaped container and the enterprise loader is correctly called
+# unsolvable rather than incorrectly called solvable.
+UNSOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
+    # THE one that matters here.
+    "recaptcha/enterprise",
+    # Forward-looking: vendors this repo has no solver for either. None has
+    # ever been seen on foodpanda.
     "hcaptcha.com/captcha",
     "geo.captcha-delivery.com",
     "datadome",
+)
+
+# Kept as a separate, currently-unused set so that the day foodpanda swaps
+# the enterprise loader for the ordinary one, the change is a one-line move
+# rather than a rewrite — and so a reader can see exactly what WOULD be
+# solvable. Deliberately not wired into `detect_bot_challenge`: a marker set
+# that is consulted but can never match is dead code wearing a policy's
+# clothes (§17).
+WOULD_BE_SOLVABLE_MARKERS: Tuple[str, ...] = (
+    "recaptcha/api.js",
+    "recaptcha/api2/anchor",
+    "recaptcha/api2/bframe",
 )
 
 _SITEKEY_RE = re.compile(r'data-sitekey="([^"]+)"')
@@ -590,23 +633,42 @@ def challenge_sitekey(html: str) -> Optional[str]:
 def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
     """The SOLVABLE challenge this page rendered, or None.
 
-    Silent about a challenge this repo cannot solve, so no solve is attempted
-    and nothing is charged for it (§8: detected ≠ blocking ≠ paying).
+    ALWAYS None on foodpanda today, and that is a measurement rather than a
+    stub: the only challenge this site renders is reCAPTCHA Enterprise, which
+    `captcha_solver.py` does not implement. Returning None is what keeps a
+    solve from being attempted and charged for a token the site would reject
+    (§8: detected != blocking != paying).
 
-    Gated on the page NOT being one the site served: the markers below are
-    generic, and running them against a good page is how a sibling repo
-    reported exit 3 on a 1.8 MB page holding the full catalogue. A served
-    page that genuinely renders a challenge inside itself is still caught,
-    because a served page carrying `g-recaptcha` has one.
+    The function is kept — rather than deleted — because `page_flow` and all
+    three engines ask it, and because the day the site swaps the enterprise
+    loader for the ordinary one this is the single place that changes. Its
+    emptiness is asserted by the offline suite against a real denial capture,
+    so a future edit that makes it return something has to be deliberate.
     """
-    text = html or ""
-    lowered = text.lower()
-    for marker in UNBOT_CHALLENGE_MARKERS:
+    lowered = (html or "").lower()
+    for marker in UNSOLVABLE_CHALLENGE_MARKERS:
         if marker in lowered:
             return None
     for marker in BOT_CHALLENGE_MARKERS:
         if marker.lower() in lowered:
-            return "recaptcha"
+            return marker
+    return None
+
+
+def unsolvable_challenge(html: str) -> Optional[str]:
+    """The challenge this page rendered that this repo CANNOT solve, or None.
+
+    Exists so a log line can say "reCAPTCHA Enterprise, which this project
+    does not implement" instead of a bare "blocked" — which is the difference
+    between a reader who understands their options and one who buys a
+    2Captcha key expecting it to help.
+    """
+    lowered = (html or "").lower()
+    if "recaptcha/enterprise" in lowered:
+        return "reCAPTCHA Enterprise"
+    for marker in UNSOLVABLE_CHALLENGE_MARKERS:
+        if marker in lowered:
+            return marker
     return None
 
 
@@ -840,19 +902,113 @@ def _closed(tile) -> Tuple[Optional[bool], Optional[str]]:
     return False, match.group(1) if match else (text or None)
 
 
-def _cuisines(tile) -> List[str]:
-    """The tile's cuisine list, in the site's own order.
+# A row's SHAPE, which is the same in every locale.
+#
+#   price level    "$", "$$", "$$$", "$$$$" — the site's own indicator
+#   delivery time  "From 25 min", "25-35 min", "25 min"
+#   delivery fee   an amount with a currency symbol beside it
+#
+# Anything matching none of these is the cuisines, which is the one row whose
+# content is free text and therefore cannot be recognised positively.
+_PRICE_LEVEL_RE = re.compile(r"^\$+$")
+_DURATION_RE = re.compile(r"\d+\s*(?:-\s*\d+\s*)?(?:min|mins|minutes|分鐘|นาที|menit|phút)\b",
+                          re.I)
 
-    Read from the FIRST info row only. A tile can carry a second one — "In-Store
-    Price", "Islandwide", "Organic" — and those are shop attributes rather
-    than cuisines; folding them in would put "In-Store Price" in a column of
-    food categories on 16% of Pakistani rows.
+# The English screen-reader labels, used as a CONFIRMATION rather than as the
+# test. Measured on foodpanda.pk and foodpanda.sg; the other nine country
+# sites were not captured tile-by-tile, which is precisely why nothing here
+# depends on them.
+_LABEL_CUISINES = "cuisines"
+_LABEL_DELIVERY_TIME = "delivery time"
+_LABEL_DELIVERY_FEE = "delivery fee"
+_LABEL_PRICE_RANGE = "price range"
+
+
+def _info_rows(tile) -> List[Tuple[str, str]]:
+    """[(label, text)] for every info row on this tile, in the site's order.
+
+    The label is the tile's own screen-reader string for that row with the
+    row's text removed — "Delivery time From 25 min" against a row reading
+    "From 25 min" gives "delivery time" — or "" where the tile publishes no
+    label for it.
     """
     rows = tile.select(SELECTORS["info_row"])
-    if not rows:
-        return []
-    text = _text(rows[0])
-    return [part.strip() for part in re.split(r"[,·•]", text) if part.strip()]
+    labels = [_text(node) for node in tile.select("span.sr-only")]
+    out: List[Tuple[str, str]] = []
+    for node in rows:
+        text = _text(node)
+        label = ""
+        for candidate in labels:
+            if text and candidate.endswith(text) and candidate != text:
+                label = candidate[: -len(text)].strip().lower()
+                break
+        out.append((label, text))
+    return out
+
+
+def _classify_row(label: str, text: str) -> str:
+    """Which KIND of info row this is: cuisines, time, fee, level or other."""
+    if _PRICE_LEVEL_RE.match(text):
+        return "price_level"
+    if _LABEL_PRICE_RANGE in label:
+        return "price_level"
+    if _DURATION_RE.search(text) or _LABEL_DELIVERY_TIME in label:
+        return "delivery_time"
+    if currency_in(text) and re.search(_AMOUNT, text):
+        return "delivery_fee"
+    if _LABEL_DELIVERY_FEE in label:
+        # A fee row with no amount on it — "Free for first order" — which is a
+        # promotion rather than a fee, and must not be read as one.
+        return "delivery_fee_note"
+    if _LABEL_CUISINES in label:
+        return "cuisines"
+    return "other"
+
+
+def _tile_info(tile):
+    """(cuisines, delivery_time, delivery_fee, fee_currency, price_level, notes).
+
+    A SEO listing tile publishes only the cuisines; a home-page tile
+    publishes all of it, because the home page is the one listing the site
+    renders with a delivery address already in play.
+    """
+    cuisines: List[str] = []
+    delivery_time = None
+    delivery_fee = None
+    fee_currency = None
+    price_level = None
+    notes: List[str] = []
+    for label, text in _info_rows(tile):
+        if not text:
+            continue
+        kind = _classify_row(label, text)
+        if kind == "cuisines":
+            cuisines = [part.strip() for part in re.split(r"[,·•]", text)
+                        if part.strip()]
+        elif kind == "delivery_time" and delivery_time is None:
+            delivery_time = text
+        elif kind == "delivery_fee" and delivery_fee is None:
+            fee_currency = currency_in(text)
+            match = re.search(_AMOUNT, text)
+            delivery_fee = _normalize_amount(match.group(0)) if match else None
+        elif kind == "price_level" and price_level is None:
+            # Kept as the site prints it AND as a count, because "$$$" is the
+            # readable form and 3 is the comparable one.
+            price_level = text
+        else:
+            notes.append(text)
+    # The one row with no positive signal of its own. On a city or area
+    # listing there is exactly one info row and it IS the cuisines, so an
+    # unlabelled document still parses correctly; on a home tile the labelled
+    # branch above has already claimed the other four.
+    if not cuisines:
+        unclaimed = [text for label, text in _info_rows(tile)
+                     if text and _classify_row(label, text) == "other"]
+        if unclaimed:
+            cuisines = [part.strip() for part in re.split(r"[,·•]", unclaimed[0])
+                        if part.strip()]
+            notes = [n for n in notes if n != unclaimed[0]]
+    return cuisines, delivery_time, delivery_fee, fee_currency, price_level, notes
 
 
 def _image_url(tile) -> Optional[str]:
@@ -888,6 +1044,7 @@ def parse_products(html: str, url: str, page: int = 1,
 
     source = source or source_of(url)
     city, area = city_area_from_url(url)
+    page_kind = listing_page_kind(url)
     page_starts = _page_starts(soup, page)
 
     rows: List[Product] = []
@@ -918,13 +1075,15 @@ def parse_products(html: str, url: str, page: int = 1,
         tags = _tags(tile)
         pct, label, upper, min_order, min_currency = _discount(tags)
         is_open, opens_at = _closed(tile)
-        cuisines = _cuisines(tile)
+        (cuisines, delivery_time, delivery_fee, fee_currency,
+         price_level, info_notes) = _tile_info(tile)
 
         rows.append(Product(
             source=source,
             url=_absolute(url, strip_tracking(href)) if href else "",
             sku=sku,
             title=title,
+            currency=fee_currency or min_currency,
             discount_pct=pct,
             rating=rating,
             review_count=review_count,
@@ -934,6 +1093,11 @@ def parse_products(html: str, url: str, page: int = 1,
             position=position_in_page[tile_page],
             is_open=is_open,
             opens_at=opens_at,
+            delivery_time=delivery_time,
+            delivery_fee=delivery_fee,
+            price_level=len(price_level) if price_level else None,
+            page_kind=page_kind,
+            info_notes=info_notes,
             cuisines=cuisines,
             tags=tags,
             discount_label=label,

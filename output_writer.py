@@ -86,6 +86,12 @@ class Product:
     # rather than the text node: the text node is truncated with an ellipsis
     # by CSS on a long name, and `title` is not. 1,904/1,904.
     title: Optional[str] = None
+    # The currency the tile's money is written in, as an ISO 4217 code read
+    # from the SYMBOL the tile prints — "Rs.69" -> PKR, "S$3.69" -> SGD. Null
+    # rather than defaulted from the hostname where the tile carries no money
+    # at all, which is every row of a city or area listing (§8: never present
+    # a guess as a fact).
+    currency: Optional[str] = None
     # From the tile's own deal label, and ONLY where that label states a
     # plain percentage: "20% off" -> 20.0. Two companion columns below carry
     # what a bare number would otherwise lose — `discount_label` keeps the
@@ -124,6 +130,34 @@ class Product:
     position: Optional[int] = None
 
     # ---- foodpanda-specific, appended after the family prefix (§9) ----
+    # The three columns the HOME page publishes and the city and area
+    # listings do not, because the home page is the one listing the site
+    # renders with a delivery address already in play. All three are null on
+    # a /city or /city/../area row, and that is a property of the page kind
+    # rather than of the vendor — `page_kind` below says which you have.
+    #
+    # The delivery estimate verbatim: "From 25 min", "From 50 min". NOT
+    # parsed into minutes: the string is the site's own hedge ("From"), and a
+    # bare 25 would present a floor as a duration.
+    delivery_time: Optional[str] = None
+    # The delivery fee as a number, with `currency` above beside it. 69.0 PKR
+    # and 3.69 SGD in the measured captures. This is the only money a
+    # foodpanda tile carries that is genuinely a price of something.
+    delivery_fee: Optional[float] = None
+    # The site's own price level, 1 to 4, printed as "$" to "$$$$". Counted
+    # from the symbols rather than mapped from the screen-reader phrase
+    # ("Inexpensive price range"), which is localised.
+    price_level: Optional[int] = None
+    # Which listing kind this row came off — "home", "city" or "area".
+    # Recorded because three of the columns above are populated on exactly
+    # one of them, and a consumer diffing a home run against a city run would
+    # otherwise read the difference as the vendor changing.
+    page_kind: Optional[str] = None
+    # Any info row the tile published that none of the columns above claimed,
+    # verbatim: "Free for first order", "In-Store Price", "Islandwide",
+    # "Organic". A list rather than a guess at which of them deserves a
+    # column of its own.
+    info_notes: List[str] = field(default_factory=list)
     # Whether the vendor is accepting orders at the moment of the fetch. A
     # closed vendor gets an overlay on its image reading "Closed until Sat
     # 10:20"; an open one gets no overlay at all. 38% of PK tiles and 35% of

@@ -620,11 +620,32 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # so a different exit is the only thing that plausibly changes the
         # outcome.
         if block_attempt < block_retries:
-            logger.warning("Page %d came back as %s from %s — retrying from "
-                           "another exit (%d/%d).", page_num, state,
-                           mask(pool.current), block_attempt + 1, block_retries)
-            pool.advance(f"{state} on page {page_num}")
-            session.relaunch()
+            # `pool` is None whenever neither --proxy nor --proxy-file was
+            # given, and the budget above is non-zero in exactly that case,
+            # so this branch is reached with no pool on the first refused
+            # page of an ordinary run. Reading `pool.current` unguarded is
+            # how that run died with AttributeError instead of reporting
+            # exit 3.
+            if has_pool:
+                logger.warning("Page %d came back as %s from %s — retrying "
+                               "from another exit (%d/%d).", page_num, state,
+                               mask(pool.current), block_attempt + 1,
+                               block_retries)
+                pool.advance(f"{state} on page {page_num}")
+            else:
+                logger.warning("Page %d came back as %s — retrying with a "
+                               "FRESH browser (%d/%d). On this site the "
+                               "refusal is a property of the session, so a "
+                               "new session is the retry; re-fetching in the "
+                               "refused one only confirms it.",
+                               page_num, state, block_attempt + 1,
+                               block_retries)
+            # Always for a local run: a fresh session is the whole point.
+            # Never over --cdp-endpoint, where a Scraping Browser profile
+            # allows one live connection and tearing it down risks
+            # `profile_locked`.
+            if not args.cdp_endpoint:
+                session.relaunch()
             d = _driver(session)
 
     if load_failed:
@@ -652,13 +673,34 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             len(html or ""),
             "which references" if served_by_foodpanda(html or "")
             else "with no reference to", debug_html,
-            page_flow.block_advice(html, headless=not args.headful,
+            page_flow.block_advice(html, headless=args.headless,
                                    has_pool=bool(pool and len(pool) > 1)))
         outcome.blocked_by = (page_flow.detect_block_marker(html or "")
                               or ("no-response" if not html else "not-served"))
         outcome.final_url = d["current_url"]()
         return outcome
 
+
+
+    # FIX 2 (see the module header of this repo's CHANGELOG for the run that
+    # found it): a state page_flow says must not be parsed is a FAILED page,
+    # not an empty one. Without this, a page refused on every attempt fell
+    # through to the parse, produced 0 rows, and the run loop read that as
+    # "this page added no new sku" — the end of the listing. The run then
+    # reported `complete` while holding a third of the catalogue.
+    #
+    # `empty` is deliberately excluded: there the site answered and the
+    # answer was nothing, which IS a complete page.
+    if state != "empty" and not page_flow.should_parse(state):
+        logger.error(
+            "Page %d finished as %r after every attempt, so it was never "
+            "read. Reporting it as a FAILED page rather than as an empty "
+            "one: a refused page that is treated as empty ends the run and "
+            "reports it complete.", page_num, state)
+        outcome.blocked_by = (page_flow.detect_block_marker(html or "")
+                              or state)
+        outcome.final_url = d["current_url"]()
+        return outcome
 
     if state == "content":
         # The wait is CHEAP here and almost always returns on its first poll,

@@ -922,19 +922,30 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 pool.advance(f"{state} on page {page_num}")
                 session.relaunch()
             else:
-                # No pool, so nowhere else to go — but a plain re-fetch is
-                # what clears this on a Scraping Browser profile. The browser
-                # is NOT relaunched: over `--cdp-endpoint` a profile allows
-                # one live connection, so tearing the session down and
-                # reconnecting risks `profile_locked` and would lose the very
-                # cookies the retry is meant to build on.
+                # No pool, so nowhere else to go — but a FRESH SESSION is
+                # what clears this on foodpanda, and re-fetching in the
+                # refused session is not a retry at all. Measured in the run
+                # that found this: 0 of 4 same-session re-fetches were
+                # served, against 10 of 30 fresh-browser navigations in an
+                # earlier sweep of the same site.
+                #
+                # Not over `--cdp-endpoint`, where the inherited reasoning
+                # still holds: a Scraping Browser profile allows one live
+                # connection, so tearing the session down risks
+                # `profile_locked` and loses the cookies the retry builds on.
                 pause = args.retry_delay * (block_attempt + 1)
-                logger.warning("Page %d came back as %s — re-fetching through "
-                               "the same access path in %.1fs (%d/%d). On this "
-                               "site that is often what clears it.",
-                               page_num, state, pause, block_attempt + 1,
-                               block_retries)
+                fresh = not args.cdp_endpoint
+                logger.warning(
+                    "Page %d came back as %s — waiting %.1fs and retrying "
+                    "%s (%d/%d).", page_num, state, pause,
+                    "with a FRESH browser, which is what actually clears this"
+                    if fresh else
+                    "through the same Scraping Browser profile (one live "
+                    "connection per profile, so it is not torn down)",
+                    block_attempt + 1, block_retries)
                 time.sleep(pause)
+                if fresh:
+                    session.relaunch()
 
     if load_failed:
         logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
@@ -962,13 +973,34 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             "a genuinely empty result (exit 4).%s",
             len(html or ""), "which references" if served else "with no "
             "reference to", debug_html,
-            page_flow.block_advice(html, headless=not args.headful,
+            page_flow.block_advice(html, headless=args.headless,
                                    has_pool=has_pool),
             (f" Tried {block_retries + 1} exit(s)." if has_pool
              else f" Re-fetched {block_retries + 1} time(s) with a fresh "
                   f"browser each time."))
         outcome.blocked_by = (page_flow.detect_block_marker(html or "")
                               or ("no-response" if not html else "not-served"))
+        outcome.final_url = session.page.url
+        return outcome
+
+
+    # FIX 2 (see the module header of this repo's CHANGELOG for the run that
+    # found it): a state page_flow says must not be parsed is a FAILED page,
+    # not an empty one. Without this, a page refused on every attempt fell
+    # through to the parse, produced 0 rows, and the run loop read that as
+    # "this page added no new sku" — the end of the listing. The run then
+    # reported `complete` while holding a third of the catalogue.
+    #
+    # `empty` is deliberately excluded: there the site answered and the
+    # answer was nothing, which IS a complete page.
+    if state != "empty" and not page_flow.should_parse(state):
+        logger.error(
+            "Page %d finished as %r after every attempt, so it was never "
+            "read. Reporting it as a FAILED page rather than as an empty "
+            "one: a refused page that is treated as empty ends the run and "
+            "reports it complete.", page_num, state)
+        outcome.blocked_by = (page_flow.detect_block_marker(html or "")
+                              or state)
         outcome.final_url = session.page.url
         return outcome
 
