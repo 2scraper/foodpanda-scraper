@@ -6,13 +6,21 @@ Shared helper used by all three scrapers (Playwright / Selenium / Puppeteer).
 Detection runs after EVERY page navigation in the main loop of all three
 scrapers, regardless of what URL was requested (category hub, product page,
 sign-in, checkout, anything) — this is deliberate, not scoped to any one
-page. If Vrbo renders a reCAPTCHA challenge anywhere — account, sign-in
-and checkout flows are the usual places — this fires.
+page. If foodpanda renders a reCAPTCHA challenge anywhere — account,
+sign-in and checkout flows are the usual places — this fires.
 
-**NO challenge of any kind has been observed on this site.** Measured
-2026-09-10 across six live captures: the pages this scraper reads carry
-none, and an address the site has scored gets no response at all rather than
-an interstitial. So this module is a contingency, not part of the happy path
+**A CHALLENGE IS RENDERED ON THIS SITE, AND THIS MODULE CANNOT SOLVE IT.**
+PerimeterX's denial page carries a `g-recaptcha` container that looks like an
+ordinary v2 checkbox, and the loader beside it is
+`https://www.google.com/recaptcha/enterprise.js` — measured on four denial
+documents across two country sites, with zero occurrences of
+`recaptcha/api.js` on any of them. This module implements v2 and v3 and NOT
+the enterprise method, so `product_parser.detect_bot_challenge` returns None
+for those pages, the state is `blocked` rather than `challenge`, and no solve
+is attempted or billed. See the README.
+
+So this module is a contingency on this site rather than part of the happy
+path
 — a bot manager can be switched on between deploys, and a scraper that
 cannot name what stopped it is much harder to fix.
 

@@ -23,7 +23,7 @@ playwright install chromium
 
 python3 playwright_scraper.py \
   --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \
-  --pages 3 --headful --delay 45 --retry-delay 30 \
+  --pages 3 --delay 45 --retry-delay 30 \
   --out gulberg --format both
 ```
 
@@ -57,8 +57,23 @@ degree:
 The refusal is a property of the **session and the moment**, not of your
 address alone: the same URL that answers 403 answers 200 two attempts later.
 So the instruments that work here, in order, are `--retries` (each attempt
-launches a fresh browser), `--retry-delay`, `--delay`, and `--headful`. Only
-after those does buying an exit help.
+launches a fresh browser), `--retry-delay` and `--delay`. Only after those
+does buying an exit help.
+
+### Headless is refused — so `--headful` is the default
+
+Unusually for this family, this scraper runs **with a window** unless you ask
+otherwise. One URL, arms alternating, a fresh browser per navigation, 45
+seconds apart so the hour and the address fall on both equally:
+
+| | Served | Tiles |
+|---|---|---|
+| `--headless` | **0 of 4** | 0, HTTP 403 every time |
+| `--headful` | **4 of 4** | 47, 48, 45, 48 |
+
+`--headless` is still there and is what the Docker image passes, because a
+container has no display. That is the reason an image can be refused where
+your laptop is not.
 
 **What the paid products actually buy on this site**: volume from many
 addresses, and an exit in the site's own country. That is what a multi-page

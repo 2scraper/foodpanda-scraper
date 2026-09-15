@@ -1,43 +1,44 @@
 #!/usr/bin/env python3
-"""vrbo-scraper — 2captcha Scraper API edition (fourth engine)
+"""foodpanda-scraper — 2captcha Scraper API edition (fourth engine)
 
 One HTTP request per page, no local browser, no Playwright install. The
 2captcha Scraper API fetches the page from its own infrastructure and returns
 the HTML; this client parses it with the same `product_parser` the browser
 engines use, so the rows and columns are identical.
 
-WHAT IT GETS, AND WHAT IT CANNOT GET — measured 2026-09-14, $0.0005 a request
------------------------------------------------------------------------------
-    HTTP 200, 3,219,172 bytes of HTML
-    3 of 50 cards parsed, every column the card publishes fully populated
-    no pagination counter in the response
+WHY THIS PATH SUITS THIS SITE BETTER THAN MOST
+-----------------------------------------------
+foodpanda SERVER-RENDERS its grid. Measured by reading the response body
+rather than the settled DOM: `?page=3` of one area listing held 44 tiles in
+the raw 918 KB response, 44 at DOMContentLoaded and 44 ten seconds later. So
+a one-shot fetch is not a compromise here — it gets the same tiles a browser
+would, which is the opposite of a sibling repo where this path reaches 3 of
+50 cards because the rest arrive over client-side GraphQL.
 
-Three is not a failure, it is the FIRST PAINT. A Vrbo search page carries its
-grid over client-side POSTs to `/graphql` — 0 `application/ld+json` blocks, 0
-`__NEXT_DATA__`, and an `__APOLLO_STATE__` holding three keys — and the rest
-of the 50 arrive only by scrolling an inner container, which a one-shot fetch
-cannot do. The browser engines reach 50 of 50; this reaches the top of the
-page.
+What a browser still buys is the thing this site actually gates on: getting
+served at all. A plain HTTP request never reaches the application — every one
+of the eleven country sites answers `curl` with Cloudflare's managed
+challenge — so this client depends entirely on the Scraper API's own
+infrastructure looking like a browser to foodpanda.
 
-`--wait-element` is NOT optional here, it is the whole job. Without it the
-wait is satisfied by the shell and you get a page with no cards in it:
+NOT LIVE-VERIFIED. No funded 2Captcha key was available while this repo was
+written, so this path is implemented and exercised offline against captured
+pages and has never been run end to end against foodpanda. Said here rather
+than left for a reader to discover from a bill.
 
-    --wait-element '[data-stid="lodging-card-responsive"]'
+`--wait-element` is cheap insurance rather than the whole job here, since the
+grid is in the first response:
 
-The other thing missing from the response is the site's own
-`1 - 50 of 300+` counter, which is what the browser engines use to know how
-much they missed. So this client cannot tell you what it did not get —
-`results_range` comes back empty and there is no completeness oracle. That is
-a property of the path, not a bug, and it is the reason the rows it writes
-are best treated as a sample rather than a page.
+    --wait-element "li[class*='bds-c-vendor-tile']"
 
-So reach for this when you want a cheap look at what is at the top of a
-search — a work list, an availability spot-check, "is this property still
-listed" — and use a browser engine when you want the page.
+What this path cannot do is PAGINATE by itself — it fetches the URL it is
+given. The `?page=N` addresses are real and public (see product_parser), so
+loop over them yourself, or use a browser engine, which also retries a
+refusal with a fresh session.
 
     python3 scraper_api_client.py \\
-        --url "https://www.vrbo.com/search?destination=Orlando,%20Florida,%20United%20States%20of%20America" \\
-        --wait-element '[data-stid="lodging-card-responsive"]'
+        --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \\
+        --wait-element "li[class*='bds-c-vendor-tile']"
 
     # $TWOCAPTCHA_KEY is read from the environment or .env, so a key never
     # has to be typed — a secret in argv is readable by anything that can run
@@ -254,7 +255,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Vrbo property scraper — 2captcha Scraper API edition (no "
+        description="foodpanda vendor-listing scraper — 2captcha Scraper API edition (no "
                     "local browser). NOTE: these pages DO need JavaScript, "
                     "and their grid hydrates only as the page is scrolled, "
                     "so a single fetch returns about 5 products where a "
@@ -268,15 +269,15 @@ def parse_args():
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
-                   help="A Vrbo search URL. Pass --wait-element "
+                   help="A foodpanda listing URL. Pass --wait-element "
                         "'[data-stid=\"lodging-card-responsive\"]' with it: "
                         "the grid arrives over client-side GraphQL, so a "
                         "fetch that does not render returns a shell with no "
-                        "cards in it. Required, unless VRBO_URL is set in the "
+                        "tiles in it. Required, unless FOODPANDA_URL is set in the "
                         "environment or in .env.")
     p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
-    p.add_argument("--out", default="vrbo_products_scraperapi", help="Output file prefix")
+    p.add_argument("--out", default="foodpanda_vendors_scraperapi", help="Output file prefix")
     p.add_argument("--timeout", type=int, default=60,
                    help=f"API-side task timeout in seconds (1-{MAX_API_TIMEOUT}, default 60)")
     p.add_argument("--cdp-url", default=None,
@@ -307,11 +308,11 @@ def parse_args():
     # --cdp-endpoint, so the env mapping is spelled out instead of defaulted.
     env_config.apply(args, keys={
         "TWOCAPTCHA_KEY": "key",
-        "VRBO_CDP_ENDPOINT": "cdp_url",
-        "VRBO_URL": "url",
+        "FOODPANDA_CDP_ENDPOINT": "cdp_url",
+        "FOODPANDA_URL": "url",
     })
     if not args.url:
-        p.error("no --url given, and VRBO_URL is not set in the environment "
+        p.error("no --url given, and FOODPANDA_URL is not set in the environment "
                 "or in .env.")
     return args
 

@@ -84,7 +84,7 @@ body:
       render: shell
       placeholder: |
         python3 playwright_scraper.py \
-          --url "https://www.vrbo.com/en/c/333-watches" \
+          --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \
           --pages 3 --out grills
     validations:
       required: true

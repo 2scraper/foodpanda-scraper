@@ -1134,8 +1134,25 @@ def parse_args():
     p.add_argument("--dump-html", default=None, metavar="PATH",
                    help="Save the exact HTML the parser is given, on success "
                         "as well as failure.")
-    p.add_argument("--headless", action="store_true", default=True)
-    p.add_argument("--headful", dest="headless", action="store_false")
+    # HEADFUL BY DEFAULT on this site, which is unusual for this family and
+    # is measured rather than cautious. One URL, arms alternating, a fresh
+    # browser per navigation, 45 seconds apart so the hour and the address
+    # fall on both equally:
+    #
+    #     headless   0 of 4 navigations served, HTTP 403 every time
+    #     headful    4 of 4 served, 45-48 tiles each
+    #
+    # `--headless` is still here and is what the Docker image passes, because
+    # a container has no display — and the Dockerfile says so rather than
+    # leaving it to be discovered as a blocked run.
+    p.add_argument("--headless", dest="headless", action="store_true",
+                   default=False,
+                   help="Run without a window. NOT the default here: a "
+                        "headless window was refused on every measured "
+                        "attempt where a headful one was served. Use it in a "
+                        "container, where there is no display anyway.")
+    p.add_argument("--headful", dest="headless", action="store_false",
+                   help="Run with a real window (the default).")
     args = p.parse_args()
     env_config.apply(args)
     if not args.url:

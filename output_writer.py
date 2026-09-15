@@ -373,14 +373,13 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
       partial  — rows were gathered, then the run stopped early
       failed   — nothing was gathered at all
 
-    `mode` and `source` are both recorded, and on this site BOTH of them
-    genuinely vary. `mode`, because a listing row and a property row populate
-    different columns: `category` is null on every listing row and populated
-    on every property row, so diffing one against the other would report the
-    column as emptied. `source`, because Vrbo runs six storefronts and a row
-    from fewo-direkt.de is priced in EUR against vrbo.com's USD — diffing
-    those would report every price on the page as changed. diff_runs.py
-    refuses a pair whose modes or sources differ.
+    `mode` and `source` are both recorded. `mode` has one value here and
+    is kept so the sidecar's shape matches the family's. `source` genuinely
+    varies and matters more than usual: foodpanda runs eleven country sites
+    and issues vendor codes PER COUNTRY, so two rows from different sites can
+    share a `sku` and be unrelated vendors. diff_runs.py refuses a pair whose
+    sources differ for exactly that reason — a cross-country diff would match
+    them and report the difference as a change.
 
     `extra` carries facts about the run that are not about any single row.
     This repo puts the listing's own counter there: `results_total`,
@@ -458,15 +457,18 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 # this site the ordering between them is not a preference — it is the only
 # thing that works.
 #
-# Vrbo publishes no `link[rel=next]`, no `a[rel=next]`, no `<link
-# rel=canonical>` and no numbered anchors anywhere on a listing page. Its
-# next control is a `<button>` that fires a GraphQL POST and leaves the
-# address bar untouched, and the URL conventions that would let a run
-# address page 2 do not fail when you try them — they silently return page 1
-# (measured: `&startIndex=50` and `&page=2` both answered HTTP 200 with the
-# counter still reading "1 - 50 of 300+" and the same first cards). So a run
-# that trusted a built URL would find no new sku, call the listing
-# exhausted, and report COMPLETE holding a sixth of the catalogue (§18).
+# foodpanda's pagination is a real address the site publishes itself — an
+# area listing renders `<a href=".../gulberg?page=2">` between batches — and a
+# cold fetch of that address returned 48 tiles sharing no vendor code with
+# page 1. So "no_new_products" really does mean the catalogue ran out here,
+# and it belongs among the COMPLETE reasons.
+#
+# What it must NOT mean is "the page was refused". That was a real bug, found
+# by this repo's first live run: a page refused on every attempt fell through
+# to the parse, produced 0 rows, and the loop read that as the end of the
+# listing — reporting COMPLETE while holding a third of the catalogue. The
+# engines now mark any state that must not be parsed, other than `empty`, as
+# a FAILED page before the loop ever sees a row count (§7, §18).
 #
 # "no new products" is therefore the data-side termination condition, and
 # "pagination_exhausted" means the site's own button was gone or disabled —

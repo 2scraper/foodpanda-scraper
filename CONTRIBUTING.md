@@ -40,40 +40,45 @@ not the check caught it.
 
 ## Reporting a site change
 
-Vrbo changing its markup is the normal way this stops working, and it
+foodpanda changing its markup is the normal way this stops working, and it
 has its own issue template. The detail that saves the most time is WHICH
-anchor broke, because on this site there is no structured data on a listing
-page to fall back on — measured zero `application/ld+json`, zero
-`__NEXT_DATA__` and zero Apollo state across six captures — so the DOM is
-not the primary path by preference, it is the only one.
+anchor broke, because on this site there is no usable structured data on a
+listing page to fall back on — the one `CollectionPage` JSON-LD block holds
+SIX names on a page of forty-eight, so it is a cross-check rather than a
+path.
 
-1. **The grid container.** `[data-testid="divSRPContentProducts"]` on a
-   search page, `[data-ssr="productsCategoryL2/L3SSR"]` on a category
-   listing. If one of these moves the run reports 0 rows and exit 4, which
-   is loud.
-2. **The tile marker.** `[data-testid="imgLeg-c"]` on a search page (one per
-   tile), `[data-testid="divProductWrapper"]` inside
-   `a[data-testid="lnkProductContainer"]` on a category listing.
-3. **The reading ORDER inside the tile** — badge, title, price, was-price,
-   rating, sold, shop, location. The field reads rest on it, deliberately,
-   because the classes around each field are build hashes:
-   `<h3 class="uitk-heading uitk-heading-5 ...">` is the title today. If Vrbo
-   reorders a tile, `title` and the prices are what break.
-4. **`span.flip`**, the shop name and the shop's city in that order, exactly
-   two per search tile.
+1. **The tile.** `li[class*="bds-c-vendor-tile"]`, whose `data-testid` IS the
+   vendor code. If this moves the run reports 0 rows and exit 4, which is
+   loud.
+2. **The link.** `a[href^="/restaurant/"]` — the fallback anchor, and the one
+   §4 calls a contract with search engines. A tile with no link at all does
+   exist (1 of 1,904 measured), which is why the code is read from the `<li>`.
+3. **The info rows**, `[data-testid="bds-c-vendor-tile__info-row-text"]`, and
+   the screen-reader labels beside them. These are read by MEANING rather
+   than by position, because a home-page tile carries five of them and a city
+   tile carries one — reading the first as the cuisines is a bug this repo
+   already shipped and fixed.
+4. **The rating block**, `[data-testid="review-and-rating"]`, whose two spans
+   are the value and the parenthesised count in that order.
+5. **The page separators**, `[data-testid="pageNumber"]`, which carry the
+   page number in their `id` and are how a scrolled document attributes a
+   tile to a page.
 
-The one place structured data does exist is a DETAIL page's
-`window.__cache` Apollo blob, which is where `--mode product` reads the real
-product id, the exact sold count and the review count.
+There is no detail-page path to fall back on: a `/restaurant/{code}/{slug}`
+page is refused to this repo on every attempt (see the README), so no mode
+reads one.
 
-A third thing can break without any path failing: the **join** between the
-tiles and the structured data. When it breaks, the row count and the prices
-stay healthy while `in_stock` and part of `brand` quietly empty out — so
-every run logs its structured-price confirmation share per page and warns
-below a floor set PER PAGE KIND (search 8%, category 70%, shop 80%; the
-achievable share differs by a factor of eight between them). If you are
-reporting a change, that percentage and the page kind are the numbers to
-include.
+A second thing can break without any anchor failing: the **page attribution**.
+`position` restarts at 1 on every page, so if the page number stops reaching
+the parser the rows still look healthy while two of them silently claim the
+same place in the listing. Every run checks that `(page, position)` is unique
+across its output and says so loudly if it is not, and the canary asserts the
+same thing.
+
+A third: the **info-row classification**. Those rows are read by meaning, so a
+change in how the site labels them shows up as cuisines full of delivery
+times rather than as an empty column. If you are reporting a change, include
+what `category` and `cuisines` actually contain.
 
 `--dump-html PATH` writes the exact bytes the parser was given, on success as
 well as failure, and a run that finds nothing writes a dump and a screenshot
@@ -98,14 +103,15 @@ history needs a decision, not a red check on every push.
 Then the rest of the presentation, in the order that matters:
 
 1. `python3 smoke_test.py` green, and the canary dispatched at least once —
-   including its WARNING branch, which is what runs when a bare GitHub
-   runner's datacentre address is refused and no `VRBO_PROXY` secret is set.
-   Unlike the sibling repos in this family, this canary needs no secret to do
-   real work: what Vrbo refuses is the browser BUILD rather than the address,
-   and a runner can install real Chrome. Whether it also gets past the
-   ADDRESS check has not been measured, which is exactly why a block there is
-   a warning rather than a failure — until you set `VRBO_PROXY`, after which
-   it is a failure, because then it means something.
+   including its SKIP branch, which is what runs when no `FOODPANDA_PROXY`
+   secret is set. This canary needs a secret to do real work: foodpanda
+   refuses a large share of cold navigations even from a residential address
+   (10 of 30 served, measured 2026-09-15), and a GitHub runner's datacentre
+   address is a worse starting position that this repo has NOT measured. So
+   without the secret the job goes green with a `::notice::` saying in words
+   that nothing was tested — a check that is always red teaches everyone to
+   ignore checks. With the secret, a block is a failure, because then it
+   means something.
 2. The repo description, homepage and topics set (see the family notes on
    what those should say).
 3. Only then the row in the org profile README — and check it with an
@@ -119,89 +125,44 @@ Then the rest of the presentation, in the order that matters:
 file of plain functions with inline HTML/JSON fixtures — no pytest, no
 conftest, no fixtures directory. Copy the nearest existing check and edit it.
 
-Five properties in this repo exist because they were once absent and cost real
-time. Tests pin all five, so a PR that breaks one will fail rather than
+Six properties in this repo exist because they were once absent and cost
+real time. Tests pin all six, so a PR that breaks one will fail rather than
 silently regress:
 
-- **`price` means three different things, and `bid_kind` says which.**
-  `current` is a live high bid, `final` is the last bid on a closed lot — a
-  hammer price only when `sold` is also true — and `starting` is a floor
-  nobody has bid. One captured lot reached €1,300 with its reserve unmet and
-  sold for nothing at all. The kind is resolved through the page's OWN
-  translation store (`lot_status_current_bid` and friends), not through a
-  table of 18 languages: two keys read "Current bid" in English and they are
-  different strings in Chinese, so a table built from the English page would
-  have matched nothing there.
-- **A null price is a reserve lot, not a failure.** 57 of 57 blank prices
-  across 13 captures carried `reserve_price_set: true`, spread through the
-  page rather than clustered at its end. So there is no price-coverage
-  threshold worth setting, and the check that matters is the INVARIANT: a
-  null price always carries the reserve flag. The canary asserts exactly
-  that.
-- **The empty-price placeholder is a ZERO-WIDTH SPACE.**
-  `.c-lot-card__price` is present on 24 of 24 cards while 2–3 hold nothing,
-  so a truthiness check on the node reports 100% coverage and writes an
-  invisible character into every row. Anything read out of a card goes
-  through the zero-width strip first.
-- **`favorite_count` comes from the rendered card, never from the payload.**
-  The payload's own `favoriteCount` reads 0 on 288 of 288 lots across 12
-  captures while the card shows the real figure on all 24 of each — present,
-  authoritative-looking and uniformly wrong.
-- **`bid_count` is a floor.** The site returns the last ten bids and states
-  no total; two lots with very different activity both reported exactly ten.
-  `bid_count_is_floor` is what says which kind of number it is.
-- **A lot page's DOM is not read.** It renders 20–40 OTHER lots in a
-  "similar lots" carousel using the same class a listing uses for its own
-  price, so "the first euro amount on the page" is a neighbour's number.
-  Every lot-mode column comes from the payload.
-- **Pagination is capped at 100 pages by the site**, and a request past the
-  cap returns page 100's own lots under HTTP 200 rather than failing. The cap
-  is enforced on the URL this repo builds AND on any link the site offers,
-  because without the second half a run reports COMPLETE holding 2,400 of
-  11,681 lots.
-- **A search that matches nothing returns 24 suggested lots** reported as
-  `total: 24`. That state is read off the payload's own
-  `extended_search_result` flag and is NOT parsed: two dozen plausible rows
-  for a query that matched nothing is worse than none.
-- **A block here is a HEADLESS browser, not a bad address.** HTTP 403 and a
-  394-byte "Access Denied" from four residential exits and one datacentre
-  one, against HTTP 200 and the full catalogue from the same addresses with a
-  real window. So `--headful` is the default, `RETRY_ON_BLOCKED` is False,
-  and the block message says so rather than sending someone to buy a proxy.
-  Block detection is INVERTED as well: a served page is recognised by the
-  site's own asset host, because Chromium's own network-error page carries
-  the site's hostname in its title and would pass any title check.
-- **A run that finds nothing writes nothing.** It must not replace a good output
-  file with `[]`. `--allow-empty` is the opt-out.
-- **Exit codes are a contract**, not decoration: `0` ok, `1` crash, `2` bad
-  usage, `3` blocked, `4` zero rows, `5` remote API error, `6` partial. A
-  pipeline branches on these.
-- **An EMPTY page is never retried and never counted as blocked.** One page
-  past the end of a listing has no lots, and a no-results search has none of
-  its own; both are correct answers to the question that was asked.
-  `page_flow.STATE_POLICY` holds that for all three engines so they cannot
-  disagree about it.
-- **A challenge marker is only consulted for a state already counted as
-  blocked**, and a marker that matches every page of the site is not a
-  marker at all. This has bitten twice in this family, and the second time
-  is why `akamai` is NOT in this repo's marker set: the string lives in the
-  response header (`server: AkamaiGHost`), not in the body of a good page or
-  a bad one — 0 occurrences in every capture. There is deliberately no
-  extension-stripping guard either: the Scraping Browser's auto-solve
-  extension does inject a recaptcha and a turnstile hunter into every page it
-  loads, but none of this repo's markers matches them even without
-  stripping, so the guard would be code that looks load-bearing and never
-  runs. Broaden the set and add the guard together.
-- **A sku already written by an earlier page of the same run is dropped, not
-  duplicated.** Unlike its sibling repos this DOES fire on healthy runs
-  here: page 1 and page 2 of one category listing shared exactly 3 products,
-  all three from the "cheaper products" carousel that appears on every page.
-  So a small non-zero drop count is expected and a large one is not. See
-  `dedupe_by_key` in `output_writer.py`.
+- **A refused page is not an exhausted listing.** This repo's first live run
+  reported `status: complete` and exit 0 while holding a third of the
+  catalogue, because a page refused on every attempt fell through to the
+  parse, produced 0 rows, and the loop read that as "no new sku". Any state
+  that must not be parsed, other than `empty`, is a FAILED page.
 
-There is also a naming check: certain phrases are banned repo-wide and the suite
-fails naming them. If it trips, read the message — the phrase is wrong for a
-reason, not merely unfashionable.
+- **The challenge is reCAPTCHA Enterprise.** PerimeterX's denial page renders
+  a v2-shaped `g-recaptcha` container, and the loader beside it is
+  `recaptcha/enterprise.js` — measured on four denial documents, with zero
+  occurrences of `recaptcha/api.js` on any of them. Reading the container
+  alone called it solvable, which would have paid for a token the site
+  rejects. `detect_bot_challenge` returns None for those pages, deliberately.
+
+- **A marker that matches every page is worse than no marker.** foodpanda
+  ships `window._pxAppId` and the string "reCAPTCHA" on EVERY page it serves —
+  the sensor bootstrap and the i18n bundle. Either as a marker would report
+  the whole catalogue as blocked. A test asserts both are on every served
+  fixture AND that neither is in any marker set.
+
+- **The info rows are read by meaning, not by position.** A home-page tile
+  carries five of them and a city tile carries one, so taking the first as the
+  cuisines put "From 25 min" in the `category` column of every home-page row —
+  100% populated and entirely wrong.
+
+- **A capped count is not a count.** The site prints `(100+)`, `(500+)`,
+  `(1000+)`, so `review_count_is_floor` rides beside `review_count`. Without
+  it a monitor reports every busy vendor as frozen at exactly 100 forever.
+  The same shape applies to `discount_is_upper_bound`: "Up to 35% off" is a
+  ceiling, and 21% of measured labels are that shape.
+
+- **The clock is not the catalogue.** `is_open` is a point-in-time reading and
+  a third of the tiles flip between any two runs, so `diff_runs.py` routes
+  rows whose only change is the opening pair to `hours_changed` and
+  `--fail-on-change` ignores it.
 
 ### Style
 
@@ -222,13 +183,17 @@ reason, not merely unfashionable.
 
 Most do not — the suite covers the parser, the writers, the captcha classifier
 and the CLI contract against inline fixtures. If yours genuinely needs
-vrbo.com, say in the PR what you ran, which URL and page kind, from
-which exit, and what you got — including the price and image coverage
-percentages the run prints, and the scroll trace from the sidecar. Note that
-a run from a datacentre address gets NO RESPONSE AT ALL, so "it returned
-nothing" from a VPS is not a finding. Product counts differ by category, by
-URL and by how far the scroll got, so a bare "worked for me" is not
-reproducible.
+a live site, say in the PR what you ran, which URL and page kind, from
+which exit, and what you got — including the name, image and rating coverage
+percentages the run prints, and the status and `pages_failed` from the
+sidecar.
+
+Note what is NOT a finding on this site: a single refused fetch. The refusal
+is per-session and probabilistic — 10 of 30 navigations served from one
+residential exit — so "it was blocked" from one attempt says nothing. Give it
+`--retries` with a real `--retry-delay`, and say how many attempts each page
+took. A three-page run that needed five attempts on page 3 and then returned
+143 vendors is a normal good result here.
 
 **Run more than the primary engine.** "Mirror them exactly" is a design rule,
 not a verification: the first live run of the pyppeteer engine crashed on its
@@ -241,8 +206,9 @@ account is not a result worth having.
 
 ## Scope
 
-This repo scrapes **public pages** on Vrbo: category listings, search
-listings and product pages, exactly as an anonymous visitor is served them.
+This repo scrapes **public pages** on foodpanda: the country home page and
+the city and area vendor listings, exactly as an anonymous visitor is served
+them.
 Out of scope: anything behind a login, anything that submits a form, and
 anything that defeats a protection rather than passing it the way an ordinary
 browser does.
