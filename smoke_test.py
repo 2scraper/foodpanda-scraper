@@ -1532,6 +1532,142 @@ def test_readme_claims():
     return ok
 
 
+# ---------------------------------------------------------------------------
+def test_concurrency_machinery(skips):
+    group("Concurrency, with the browser stubbed out (§10)")
+    ok = True
+    try:
+        import playwright_scraper as engine
+    except ImportError as exc:
+        skips.append(f"playwright_scraper (concurrency): {exc}")
+        return ok
+
+    import threading
+
+    class _Args:
+        delay = 0.0
+        out = "unused"
+
+    class _FakeSession:
+        """Stands in for _BrowserSession: opens, closes, carries a pool."""
+
+        def __init__(self, *a, **kw):
+            self.pool = None
+
+        def open(self):
+            return self
+
+        def close(self):
+            pass
+
+    def run(specs, concurrency, fetch):
+        """Drive the real dispatcher with the browser replaced."""
+        real_session = engine._BrowserSession
+        real_fetch = engine._fetch_one_page
+        real_pw = engine.sync_playwright
+        try:
+            engine._BrowserSession = _FakeSession
+            engine._fetch_one_page = fetch
+            # `with sync_playwright() as pw` — a context manager yielding
+            # anything will do, since the fake session ignores it.
+            import contextlib
+            engine.sync_playwright = lambda: contextlib.nullcontext(None)
+            return engine._fetch_pages_concurrently(_Args(), None, specs,
+                                                    concurrency)
+        finally:
+            engine._BrowserSession = real_session
+            engine._fetch_one_page = real_fetch
+            engine.sync_playwright = real_pw
+
+    def outcome(page_num, products=1):
+        o = engine.PageOutcome(page_num=page_num, url=f"u{page_num}")
+        o.products = [object()] * products
+        o.final_url = f"u{page_num}"
+        return o
+
+    # 1. Every queued page is fetched EXACTLY once, across workers.
+    seen = []
+    seen_lock = threading.Lock()
+
+    def counting_fetch(session, args, pool, page_num, url):
+        with seen_lock:
+            seen.append(page_num)
+        return outcome(page_num)
+
+    specs = [(n, f"https://www.foodpanda.pk/city/lahore/area/g?page={n}")
+             for n in range(2, 10)]
+    results, unattempted, exhausted = run(specs, 3, counting_fetch)
+    ok &= check("every queued page is fetched exactly once",
+                sorted(seen) == [n for n, _ in specs])
+    ok &= check("every fetch produces an outcome", len(results) == len(specs))
+    ok &= check("nothing is left unattempted when every page succeeds",
+                unattempted == [])
+    ok &= check("the listing was not reported as exhausted", exhausted is False)
+
+    # 2. Outcomes are restorable to PAGE order, whatever order they finished
+    #    in — §8's "merge in page order, not arrival order".
+    ordered = sorted(results, key=lambda o: o.page_num)
+    ok &= check("outcomes sort back into page order",
+                [o.page_num for o in ordered] == [n for n, _ in specs])
+
+    # 3. The end-of-listing event stops dispatch. A page with no rows means
+    #    the catalogue ran out, and asking for 50 pages of a 5-page listing
+    #    must not fetch 45 empty ones.
+    fetched = []
+    fetched_lock = threading.Lock()
+
+    def ending_fetch(session, args, pool, page_num, url):
+        with fetched_lock:
+            fetched.append(page_num)
+        return outcome(page_num, products=0 if page_num >= 3 else 1)
+
+    many = [(n, f"u{n}") for n in range(2, 51)]
+    results, unattempted, exhausted = run(many, 2, ending_fetch)
+    ok &= check(f"dispatch stops at the end of the listing "
+                f"({len(fetched)} of {len(many)} fetched)",
+                len(fetched) < len(many) / 2)
+    ok &= check("...and says so", exhausted is True)
+    # The §10 requirement: pages never tried are REPORTED as unattempted, not
+    # counted as failed. Claiming 45 failed pages when dispatch simply
+    # stopped would overstate the damage by an order of magnitude.
+    ok &= check("the pages never tried are reported as unattempted",
+                len(unattempted) == len(many) - len(fetched))
+    ok &= check("...in page order", unattempted == sorted(unattempted))
+
+    # 4. A worker that RAISES neither hangs the run nor loses its siblings'
+    #    pages. Its own pages are simply absent from the results, which the
+    #    caller reports as failed rather than counting as empty.
+    survived = []
+    survived_lock = threading.Lock()
+
+    def exploding_fetch(session, args, pool, page_num, url):
+        if page_num == 4:
+            raise RuntimeError("this worker is gone")
+        with survived_lock:
+            survived.append(page_num)
+        return outcome(page_num)
+
+    specs = [(n, f"u{n}") for n in range(2, 8)]
+    results, unattempted, exhausted = run(specs, 3, exploding_fetch)
+    ok &= check("a worker that raises does not hang the run", True)
+    ok &= check("its siblings' pages still arrive", len(survived) >= 3)
+    ok &= check("the dead worker's page is absent, not empty",
+                4 not in [o.page_num for o in results])
+
+    # 5. Each worker gets its OWN pool, rotated to a different offset — which
+    #    is what makes the concurrency lock-free by construction (§7).
+    pool = ProxyPool(["http://" + "a" + ":" + "b" + "@h1:1",
+                      "http://" + "c" + ":" + "d" + "@h2:2",
+                      "http://" + "e" + ":" + "f" + "@h3:3"])
+    firsts = [engine._worker_pool(pool, i).current for i in range(3)]
+    ok &= check("three workers start on three different exits",
+                len(set(firsts)) == 3)
+    ok &= check("a worker pool is a separate object from the shared one",
+                all(engine._worker_pool(pool, i) is not pool for i in range(3)))
+    ok &= check("no pool means no worker pool", engine._worker_pool(None, 0) is None)
+    return ok
+
+
 # The floor the README and CHANGELOG quote. Deliberately a FLOOR rather than
 # an exact number: an exact count goes stale the moment a check is added, and
 # a stale number in a README is worse than no number (§17). Raise it when it
@@ -1559,6 +1695,7 @@ def main() -> int:
     ok &= test_env_config()
     ok &= test_proxy_pool_and_credentials()
     ok &= test_engine_parity(skips)
+    ok &= test_concurrency_machinery(skips)
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()
     ok &= test_wording()
