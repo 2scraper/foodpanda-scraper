@@ -15,6 +15,10 @@ or from a half-empty output file.
 
 ### Fixed
 
+- **The README was missing its canary badge.** The workflow has been
+  running all along; the badge that reports it was never added, so the
+  one signal that says whether this scraper still works against the live
+  site was invisible above the fold.
 - **Fifteen lines of unreachable code removed from `playwright_scraper.py`.**
   A function's `def` line had been lost at some point before this repo's
   first commit, leaving its docstring and its `try: return page.content()`

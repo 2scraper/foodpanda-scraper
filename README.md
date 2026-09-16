@@ -2,6 +2,7 @@
 
 [![release](https://img.shields.io/github/v/release/2scraper/foodpanda-scraper?sort=semver)](https://github.com/2scraper/foodpanda-scraper/releases)
 [![tests](https://github.com/2scraper/foodpanda-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/foodpanda-scraper/actions/workflows/tests.yml)
+[![canary](https://github.com/2scraper/foodpanda-scraper/actions/workflows/canary.yml/badge.svg)](https://github.com/2scraper/foodpanda-scraper/actions/workflows/canary.yml)
 [![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue)](pyproject.toml)
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%C2%B7%20Selenium%20%C2%B7%20pyppeteer%20%C2%B7%20CDP-lightgrey)](#engines)
