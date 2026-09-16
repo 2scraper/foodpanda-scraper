@@ -80,10 +80,27 @@ createTask: RecaptchaV2EnterpriseTaskProxyless (sitekey=6Lc...)
 | | |
 |---|---|
 | **PerimeterX's stub** — a 4.7 KB denial with 24 `px-captcha` references and no widget at all | nothing there for any solver, at any price |
-| **Cloudflare Turnstile** | 2Captcha solves it (`TurnstileTaskProxyless`); this repo does not implement the task, which needs `cData`/`chlPageData` intercepted before the widget loads. A browser engine never meets it anyway |
 
-Both are reported as `blocked` with the reason named, so nothing is attempted
-or billed for a task this code cannot build.
+That one is reported as `blocked` with the reason named, so nothing is
+attempted or billed.
+
+### Cloudflare's "Just a moment…" IS solved
+
+Turnstile is implemented, Challenge page included. Measured 2026-09-16
+against `foodpanda.com`'s own challenge: `TurnstileTaskProxyless`, 11
+seconds, **$0.00145**, and the page came back as the real site.
+
+If a Turnstile is detected and the log says **no sitekey was captured**, the
+interception did not run in time. A Challenge page publishes no sitekey in
+its markup — Cloudflare passes it to `turnstile.render` and keeps nothing —
+so `captcha_solver.TURNSTILE_INTERCEPT_JS` has to be installed on the context
+before any page script. Every engine here does that at context creation; the
+case where it fails is a browser attached mid-flight, over `--cdp-endpoint`
+to a page that had already loaded.
+
+The user agent mismatch is logged but was **not** fatal in testing: 2Captcha
+minted against Windows, the browser was macOS, and Cloudflare accepted it.
+Rule it out before chasing it.
 
 ---
 

@@ -166,6 +166,29 @@ found only by running the SECONDARY engines rather than just the primary one
   carries only the hyphenated class `g-recaptcha` — so anyone debugging from
   a `--dump-html` capture was told there was no captcha at all.
 
+* **Cloudflare Turnstile is implemented, Challenge page included.** The
+  hard half is that a Challenge page publishes no sitekey: Cloudflare calls
+  `turnstile.render(container, params)` once and keeps nothing, and `cData`,
+  `chlPageData` and `action` exist only in that call. So every engine now
+  installs an interception script on the context before any page script runs
+  — `add_init_script`, `evaluateOnNewDocument` and CDP
+  `Page.addScriptToEvaluateOnNewDocument` respectively. Measured 2026-09-16
+  against foodpanda.com's own "Just a moment…": all four parameters
+  captured, `TurnstileTaskProxyless`, solved in 11 seconds for **$0.00145**,
+  and the page came back as the real site. A static detection with no sitekey
+  now REFUSES to build a task rather than spending money on a request
+  2Captcha would reject.
+
+* **`cf-turnstile` was tried as a marker and thrown away**, which is §8's
+  extension trap arriving for real. 2Captcha's Scraping Browser injects
+  `chrome-extension://…/content/captcha/turnstile/hunter.js` with
+  `data-ts-input="cf-turnstile-response"` into every page it loads, so the
+  string appears once on a SERVED Hong Kong listing and **zero** times on the
+  real Cloudflare challenge — a marker that fires on good pages and misses
+  the bad one. Caught by this repo's own §18 check.
+  `challenges.cloudflare.com` is the marker that works: 0 on every served
+  page, 5 on the challenge.
+
 ### Known limitations, stated rather than worked around
 
 * **No vendor-page mode.** A `/restaurant/{code}/{slug}` page is where a

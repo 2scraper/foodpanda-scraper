@@ -313,18 +313,47 @@ no `size` as v3, bought a `RecaptchaV3TaskProxyless`, and got
 `ERROR_CAPTCHA_UNSOLVABLE` after 87 seconds and $0.003. v3 never renders a
 challenge frame, so a frame present now settles the variant as a v2 checkbox.
 
-**What is NOT solvable**, and the difference matters:
+### Cloudflare Turnstile is implemented too, Challenge page included
 
-* **PerimeterX's stub.** A second denial variant, 4.7 KB, carries 24
-  `px-captcha` references and **no widget at all**. There is nothing there
-  for any solver to work on, at any price. Reported as `blocked`, and nothing
-  is attempted or billed.
-* **Cloudflare's managed challenge.** 2Captcha does solve Turnstile
-  (`TurnstileTaskProxyless`), but this repo does not implement the task — it
-  needs `cData` and `chlPageData` intercepted from the page before the widget
-  loads. It also never comes up in practice: Cloudflare's challenge is what a
-  **non-browser** client gets, and every engine here drives a real browser.
-  Reported as `blocked`, with that reason named.
+The other refusal this site can produce is Cloudflare's managed challenge —
+"Just a moment…", which `foodpanda.com` serves even to a browser. That is
+solved as well. Measured 2026-09-16:
+
+| | |
+|---|---|
+| intercepted | `sitekey`, `action: managed`, `cData`, `chlPageData` |
+| task type | `TurnstileTaskProxyless` |
+| solved in | 11 seconds, an 837-character token |
+| after injection | `Home | foodpanda | food and more, delivered`, 120 KB — through the challenge |
+| cost | **$0.00145** |
+
+**The interception is the whole trick.** A Challenge page publishes no
+sitekey in its markup: Cloudflare calls `turnstile.render(container, params)`
+once and keeps nothing, and `cData`, `chlPageData` and `action` live only in
+that call. So every engine installs
+`captcha_solver.TURNSTILE_INTERCEPT_JS` on the context **before any page
+script runs** — `add_init_script` in Playwright, `evaluateOnNewDocument` in
+pyppeteer, `Page.addScriptToEvaluateOnNewDocument` over CDP in Selenium. A
+static read alone cannot produce a solvable task, and this repo refuses to
+build one from it rather than spend money on a request 2Captcha will reject.
+
+One thing that did **not** matter, against expectation: the user agent.
+2Captcha minted the token against a Windows UA while the browser was macOS,
+and Cloudflare accepted it anyway. The mismatch is logged so it can be ruled
+out if a token is ever refused.
+
+**What is NOT solvable**: PerimeterX's stub. A second denial variant, 4.7 KB,
+carries 24 `px-captcha` references and **no widget at all** — nothing there
+for any solver to work on, at any price. Reported as `blocked`, and nothing
+is attempted or billed.
+
+**A marker that had to be thrown away.** `cf-turnstile` looks like the
+obvious way to spot a Turnstile and is measured useless here: it appears once
+on a *served* Hong Kong listing — 2Captcha's own Scraping Browser injects a
+`chrome-extension://…/turnstile/hunter.js` with `data-ts-input="cf-turnstile-response"`
+into every page it loads — and **zero** times on the real Cloudflare
+challenge. `challenges.cloudflare.com` is the marker that works: 0 on every
+served page, 5 on the challenge.
 
 **Is a solve the right move?** Usually not, on cost alone: the refusal is
 per-session and a fresh browser clears it for nothing — which is why

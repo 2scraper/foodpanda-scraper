@@ -84,7 +84,7 @@ from product_parser import (BOT_CHALLENGE_MARKERS, BLOCK_MARKERS,
                             PAGE_CAP, PAGINATES_BY_URL, REFUSED_HOSTS,
                             SELECTORS, THIN_PAGE_FLOOR, TYPICAL_PAGE_SIZE,
                             UNSOLVABLE_CHALLENGE_MARKERS,
-                            WOULD_BE_SOLVABLE_MARKERS, city_area_from_url,
+                            SOLVABLE_PRODUCTS, city_area_from_url,
                             currency_in, detect_block_marker,
                             detect_bot_challenge, detect_page_state, int_in,
                             is_no_results, is_supported_host,
@@ -570,11 +570,12 @@ def test_page_state():
                     detect_block_marker(html_of(name)) is None)
 
     for name in BLOCK_FIXTURES:
-        # A refusal is `blocked` UNLESS it hands us something solvable — the
-        # two PerimeterX pages that render an enterprise widget are
-        # `challenge`, which is what makes a solve worth paying for. The
-        # distinction is the point, so it is asserted rather than glossed.
-        want = ("challenge" if "RECAPTCHA" in name else "blocked")
+        # A refusal is `blocked` UNLESS it hands us something solvable. Two
+        # of these do: the PerimeterX pages that render a reCAPTCHA
+        # Enterprise widget, and Cloudflare's Challenge page, whose Turnstile
+        # this repo now intercepts and solves. Only PerimeterX's widget-less
+        # stub is genuinely blocked.
+        want = ("blocked" if name == "BLOCK_PX_PLAIN" else "challenge")
         ok &= check(f"{name} is {want}",
                     detect_page_state(html_of(name), 403, url_of(name)) == want)
         ok &= check(f"{name} is NOT served by foodpanda",
@@ -729,18 +730,74 @@ def test_the_challenge_is_enterprise_and_solvable():
     ok &= check("...with the reason named rather than shrugged at",
                 "no widget" in (unsolvable_challenge(stub) or ""))
 
-    # Cloudflare: 2captcha CAN solve Turnstile; this repo does not implement
-    # the task, and a browser engine never meets the challenge anyway. The
-    # wording has to keep those apart.
+    # Cloudflare Turnstile, which this repo now implements — including the
+    # Challenge page, solved end to end on 2026-09-16 for $0.00145.
     cf = html_of("BLOCK_CLOUDFLARE")
-    ok &= check("Cloudflare is blocked, not attempted",
-                detect_bot_challenge(cf) is None
+    ok &= check("Cloudflare is a solvable challenge",
+                detect_bot_challenge(cf) == "turnstile"
                 and detect_page_state(cf, 403, url_of("BLOCK_CLOUDFLARE"))
-                == "blocked")
-    reason = unsolvable_challenge(cf) or ""
-    ok &= check("...named as Turnstile", "Turnstile" in reason)
-    ok &= check("...and NOT described as impossible",
-                "2captcha solves it" in reason)
+                == "challenge")
+    ok &= check("...with nothing listed as unsolvable",
+                unsolvable_challenge(cf) is None)
+    cf_challenge = captcha_solver.detect_turnstile(cf, url_of("BLOCK_CLOUDFLARE"))
+    ok &= check("the static detector recognises it", cf_challenge is not None)
+    # A Challenge page publishes NO sitekey in its markup — the widget is
+    # rendered by script — so the static read cannot produce a solvable task
+    # and must refuse rather than spend money on one 2captcha will reject.
+    ok &= check("...without a sitekey, because the markup has none",
+                cf_challenge is not None and not cf_challenge.sitekey)
+    ok &= check("...and refuses to build a task from it",
+                _raises(lambda: captcha_solver.turnstile_task_for(cf_challenge)))
+
+    # The task shapes, which differ between a standalone widget and a
+    # Challenge page. Getting the second wrong means paying for a token
+    # Cloudflare rejects.
+    standalone = captcha_solver.detect_turnstile(
+        '<div class="cf-turnstile" data-sitekey="0x4AAAAAAADnPIDROrmt1Wwj">'
+        '</div>', "https://example.com/login")
+    ok &= check("a standalone widget yields its sitekey",
+                standalone is not None
+                and standalone.sitekey == "0x4AAAAAAADnPIDROrmt1Wwj")
+    ok &= check("...and is not mistaken for a Challenge page",
+                standalone is not None
+                and not standalone.is_cloudflare_challenge)
+    task = captcha_solver.turnstile_task_for(standalone)
+    ok &= check("...with the standalone task type",
+                task["type"] == "TurnstileTaskProxyless")
+    ok &= check("...carrying no Challenge-page parameters",
+                "data" not in task and "pagedata" not in task)
+
+    page_challenge = captcha_solver.CaptchaChallenge(
+        kind="turnstile", sitekey="0xABC", action="managed",
+        page_url="https://www.foodpanda.com/", cdata="CDATA",
+        pagedata="PAGEDATA")
+    ok &= check("intercepted parameters make it a Challenge page",
+                page_challenge.is_cloudflare_challenge)
+    page_task = captcha_solver.turnstile_task_for(page_challenge)
+    ok &= check("...and all three reach the task",
+                page_task.get("action") == "managed"
+                and page_task.get("data") == "CDATA"
+                and page_task.get("pagedata") == "PAGEDATA")
+
+    # §8's extension trap, which this repo hit for real. 2Captcha's Scraping
+    # Browser injects a `cf-turnstile-response` hunter into every page it
+    # loads, so the bare string is on a SERVED listing and absent from the
+    # real challenge. It must not be a marker.
+    hk = html_of("LISTING_HK_CITY")
+    ok &= check("the Scraping Browser extension is in the HK capture",
+                "chrome-extension://" in hk and "cf-turnstile-response" in hk)
+    ok &= check("...and the real Cloudflare challenge carries no cf-turnstile",
+                "cf-turnstile" not in cf)
+    ok &= check("...so cf-turnstile is not a marker",
+                not any("cf-turnstile" == m for m in BOT_CHALLENGE_MARKERS))
+    ok &= check("...and that served page is not called a challenge",
+                detect_bot_challenge(hk) is None)
+
+    # v1 has its own Turnstile method and this module does not implement it.
+    # Refusing beats sending a reCAPTCHA-shaped request that cannot work.
+    ok &= check("the legacy v1 API refuses Turnstile rather than half-trying",
+                _raises(lambda: captcha_solver.solve_recaptcha(
+                    page_challenge, "dummy", api_version="v1")))
 
     ok &= check("a served page is never reported as a challenge",
                 all(detect_bot_challenge(html_of(n)) is None

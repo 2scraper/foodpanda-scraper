@@ -15,10 +15,10 @@ written three times inside three engines and drifting apart (§1):
                reCAPTCHA Enterprise widget. Measured: solved in ~55s for
                $0.00299, after which the page came back with its grid, while
                a plain reload cleared the same block 0 of 8 times
-    blocked    a refusal with nothing solvable on it — PerimeterX's
-               widget-less stub, or Cloudflare's managed challenge (2captcha
-               solves Turnstile; this repo does not implement the task, and a
-               browser engine never meets it anyway)
+    blocked    a refusal with nothing solvable on it, which here means
+               PerimeterX's widget-less stub. Cloudflare's managed challenge
+               is NOT in this state: its Turnstile is intercepted and solved
+               (measured: 11s, $0.00145, and the page came back)
 
 The policy lives in `STATE_POLICY` as DATA, so an engine cannot quietly
 disagree with its twins about whether a page is worth retrying or worth
