@@ -375,7 +375,7 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
 
     `mode` and `source` are both recorded. `mode` has one value here and
     is kept so the sidecar's shape matches the family's. `source` genuinely
-    varies and matters more than usual: foodpanda runs eleven country sites
+    varies and matters more than usual: foodpanda runs ten country sites
     and issues vendor codes PER COUNTRY, so two rows from different sites can
     share a `sku` and be unrelated vendors. diff_runs.py refuses a pair whose
     sources differ for exactly that reason — a cross-country diff would match

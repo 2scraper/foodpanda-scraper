@@ -1109,7 +1109,7 @@ def parse_args():
     p.add_argument("--url", default=None,
                    help="foodpanda listing URL: a country home page, "
                         "/city/{city}, or /city/{city}/area/{area} (the one "
-                        "that paginates). Eleven country sites are supported; "
+                        "that paginates). Ten country sites are supported; "
                         "the country is the host. Required, unless "
                         "FOODPANDA_URL is set in the environment or in .env.")
     p.add_argument("--mode", choices=["listing"], default="listing",
@@ -1159,11 +1159,15 @@ def parse_args():
                    default="when-blocked",
                    help="when-blocked (default): only pay to solve a "
                         "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Note that "
-                        "NO challenge has ever been observed on this site — a "
-                        "refused request gets no page at all — so neither "
-                        "setting has anything to act on today, and neither "
-                        "helps with a refusal.")
+                        "always: solve whenever one is detected. Both "
+                        "of this site's challenges go through here: "
+                        "PerimeterX's denial renders a reCAPTCHA Enterprise "
+                        "widget (~55s, $0.00299 measured) and Cloudflare's "
+                        "managed challenge is a Turnstile (11s, $0.00145, "
+                        "Challenge page included). Only PerimeterX's "
+                        "widget-less denial variant has nothing to act on. "
+                        "when-blocked stays the default because the refusal "
+                        "is per-session and a fresh browser clears it free.")
     p.add_argument("--min-score", type=float, default=0.7)
     p.add_argument("--cdp-endpoint", default=None,
                    help="Connect to a running browser over CDP, e.g. "

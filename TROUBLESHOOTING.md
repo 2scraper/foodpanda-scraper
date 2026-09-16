@@ -106,17 +106,20 @@ Rule it out before chasing it.
 
 ## "Just a moment..." instead of the site
 
-This is **Cloudflare's managed challenge**, and it means something different
-from the section above: your client did not look like a browser at all, so it
-never reached the application.
+This is **Cloudflare's managed challenge**, which sits in front of the
+application rather than inside it — so it is a different thing from
+PerimeterX's denial above, and it is solved a different way.
 
-Measured with `curl` against all ten country sites: every one returned
-HTTP 403 and this document, while a real browser on the same address was
-served normally seconds later.
+Every non-browser client gets it. Measured with `curl` against all ten
+country sites: every one returned HTTP 403 and this document, while a real
+browser on the same address was served normally seconds later. If you are
+seeing it from `requests` or `curl`, that is the whole explanation.
 
-If you are seeing it **from a browser engine**, something has stripped the
-context. Prefer `playwright_scraper.py`, which is the engine every
-measurement here was taken with.
+**A browser engine can meet one too** — `foodpanda.com` serves it to a real
+browser — and that is not a proxy problem either. It is a Turnstile, and this
+repo solves it: see "Cloudflare's 'Just a moment…' IS solved" above. With no
+key, the answer is the same as for any refusal here: `--retries`, which
+launches a fresh browser each attempt.
 
 ---
 

@@ -362,13 +362,12 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     marker = detect_block_marker(html or "")
     if marker == "Cloudflare":
         return (
-            "blocked (Cloudflare's managed challenge). This is what a client "
-            "that does not look like a browser gets — every one of the eleven "
-            "country sites answers a plain HTTP request with it, measured. If "
-            "you are seeing it from a browser engine, the browser is not "
-            "being driven as one: check that nothing has stripped the "
-            "context, and prefer the Playwright engine, which is the one this "
-            "site was verified on.")
+            "blocked (Cloudflare's managed challenge). Every non-browser "
+            "client gets this — all eleven hosts probed answer a plain HTTP "
+            "request with it, measured — and foodpanda.com serves one to a "
+            "real browser too. It is a Turnstile, so --solve-captcha clears "
+            "it (11s, $0.00145 measured); without a key, --retries is the "
+            "instrument, since every attempt launches a fresh browser.")
     hints = [
         "this refusal is per-session and it clears: the same address was "
         "served on a later attempt in 10 of 30 measured navigations, with no "
