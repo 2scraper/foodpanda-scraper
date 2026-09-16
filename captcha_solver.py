@@ -171,6 +171,26 @@ class CaptchaChallenge:
     # the static markup loads `recaptcha/enterprise.js`, and the live page
     # exposes `window.grecaptcha.enterprise`.
     enterprise: bool = False
+    # Cloudflare Turnstile only, and only on a CHALLENGE PAGE. These are
+    # arguments to `turnstile.render` that the page makes once and does not
+    # keep, so they exist here only if the interception script below was
+    # installed before the widget loaded. A standalone Turnstile widget needs
+    # none of them.
+    cdata: Optional[str] = None
+    pagedata: Optional[str] = None
+    # The user agent 2captcha minted the token against. Cloudflare binds a
+    # challenge token to it, so a run that solves with one UA and submits
+    # with another is a run that pays and stays blocked.
+    solved_user_agent: Optional[str] = None
+
+    @property
+    def is_turnstile(self) -> bool:
+        return self.kind == "turnstile"
+
+    @property
+    def is_cloudflare_challenge(self) -> bool:
+        """A Turnstile whose parameters say it guards a Challenge page."""
+        return self.is_turnstile and bool(self.cdata or self.pagedata)
 
     @property
     def is_v3(self) -> bool:
@@ -190,6 +210,55 @@ _ENTERPRISE_LOADER_RE = re.compile(
 
 def _is_enterprise_html(html: str) -> bool:
     return bool(_ENTERPRISE_LOADER_RE.search(html or ""))
+
+
+# Turnstile's own markup and the Challenge page's furniture. The sitekey is
+# a `0x…` string rather than reCAPTCHA's `6L…`, and the widget's class is
+# `cf-turnstile`.
+_TURNSTILE_SITEKEY_RE = re.compile(
+    r'(?:class=["\'][^"\']*\bcf-turnstile\b[^"\']*["\'][^>]*'
+    r'data-sitekey=["\']([\w-]{8,})["\']'
+    r'|data-sitekey=["\']([\w-]{8,})["\'][^>]*'
+    r'class=["\'][^"\']*\bcf-turnstile\b)')
+# Cloudflare's OWN furniture. `cf-turnstile` is not here: 2Captcha's
+# Scraping Browser extension injects a `cf-turnstile-response` hunter into
+# every page it loads, so the bare string appears on perfectly good listings
+# fetched over --cdp-endpoint and does NOT appear on the real challenge
+# (measured: 1 occurrence on a served page, 0 on the challenge).
+#
+# A standalone widget is still found, by the class-plus-sitekey pattern
+# above, which the extension's script tag cannot match.
+_TURNSTILE_MARKERS = ("challenges.cloudflare.com/turnstile",
+                      "challenges.cloudflare.com",
+                      "__cf_chl", "cf_chl_opt")
+
+
+def detect_turnstile(html: str, page_url: str = "") -> Optional[CaptchaChallenge]:
+    """A Cloudflare Turnstile on this page, from the STATIC markup.
+
+    Finds a standalone widget by its sitekey. A CHALLENGE PAGE usually
+    publishes no sitekey in its markup at all — the widget is rendered by
+    script — so this returns a challenge with an empty sitekey when it can
+    see Cloudflare's own furniture but no key. That is not a failure: it
+    tells the caller a Turnstile is here and the runtime interception is the
+    only way to get its parameters.
+
+    A sitekey-less challenge is NOT solvable as it stands, and
+    `turnstile_task_for` refuses to build a task from one rather than
+    spending money on a request 2captcha will reject.
+    """
+    text = html or ""
+    match = _TURNSTILE_SITEKEY_RE.search(text)
+    sitekey = (match.group(1) or match.group(2)) if match else ""
+    if not match and not any(m in text for m in _TURNSTILE_MARKERS):
+        return None
+    # `action` is left EMPTY rather than inheriting this dataclass's
+    # reCAPTCHA-flavoured "verify" default. For a Turnstile that string is
+    # not a placeholder the API ignores — on a Challenge page the action is
+    # part of what the token is minted against, and an invented one buys a
+    # token Cloudflare rejects.
+    return CaptchaChallenge(kind="turnstile", sitekey=sitekey, action="",
+                            page_url=page_url, source="html")
 
 
 def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
@@ -578,6 +647,13 @@ def _v2_task_for(challenge: CaptchaChallenge, min_score: float) -> dict:
     places. The non-proxyless variants (RecaptchaV2Task) exist for the cases
     where that is not true, and they are not wired up here.
     """
+    if challenge.is_turnstile:
+        # A different product with a different task shape; see
+        # `turnstile_task_for`, which also refuses to build one without a
+        # sitekey rather than spending money on a request that cannot
+        # succeed.
+        return turnstile_task_for(challenge)
+
     if challenge.is_v3:
         # minScore is not free-form: 0.3 / 0.7 / 0.9 are the documented values.
         score = min(V3_ALLOWED_MIN_SCORES,
@@ -650,6 +726,17 @@ def _solve_with_2captcha_v2(api_key: str, challenge: CaptchaChallenge,
                 f"{result.get('errorDescription')}")
         if result.get("status") == "ready":
             solution = result.get("solution") or {}
+            # Cloudflare binds a Challenge-page token to the user agent it
+            # was solved against. Record it so a caller can match it before
+            # submitting; ignoring it is how a paid-for token gets rejected.
+            if solution.get("userAgent"):
+                challenge.solved_user_agent = solution["userAgent"]
+                if challenge.is_cloudflare_challenge:
+                    logger.info(
+                        "The token was minted for user agent %r — a Challenge "
+                        "page checks it, so submit from a browser claiming "
+                        "the same one.",
+                        solution["userAgent"][:60] + "…")
             # v2 returns the same string under both names.
             token = solution.get("gRecaptchaResponse") or solution.get("token")
             if not token:
@@ -747,6 +834,14 @@ def solve_recaptcha(challenge: CaptchaChallenge, twocaptcha_api_key: Optional[st
             "API you may not need either: Captcha.setAutoSolve can clear it "
             "inside the browser."
         )
+    if challenge.is_turnstile and api_version == "v1":
+        # The legacy in.php/res.php pair has its own Turnstile method, and
+        # this module does not implement it. Refusing is the honest answer:
+        # falling through to the reCAPTCHA-shaped request would spend a
+        # createTask on something that cannot come back right.
+        raise CaptchaUnsolvable(
+            "Turnstile is only implemented on the v2 API here. Drop "
+            "--captcha-api v1 (v2 is the default) to solve it.")
     solver = _solve_with_2captcha_v1 if api_version == "v1" else _solve_with_2captcha_v2
     return solver(twocaptcha_api_key, challenge, min_score=min_score)
 
@@ -779,6 +874,213 @@ _UNSOLVABLE_CODES = frozenset((
 ))
 
 
+
+
+# Installed on EVERY new document, before any of the page's own script runs.
+#
+# `turnstile.render(container, params)` is called once by Cloudflare's
+# challenge and its `params` — which carry `cData`, `chlPageData` and
+# `action` — are not kept anywhere afterwards. 2captcha needs all three to
+# solve a Challenge page, so the only way to have them is to be there first.
+#
+# The wrapper records the parameters, keeps the page's own callback so a
+# token can be handed back the way the page expects, and still calls through
+# to the real `render` so the page behaves normally if no solve happens.
+TURNSTILE_INTERCEPT_JS = """
+(() => {
+  if (window.__tsIntercepted) { return; }
+  window.__tsIntercepted = true;
+  window.__tsParams = null;
+  window.__tsCallback = null;
+  const grab = (params) => {
+    try {
+      window.__tsParams = {
+        sitekey: params.sitekey,
+        action: params.action || null,
+        cData: params.cData || null,
+        chlPageData: params.chlPageData || null,
+        pageurl: window.location.href
+      };
+      if (typeof params.callback === 'function') {
+        window.__tsCallback = params.callback;
+      }
+    } catch (e) { /* best effort, never break the page */ }
+  };
+  // The object may not exist yet, so watch for it rather than poll forever.
+  let installed = false;
+  const install = () => {
+    if (installed || !window.turnstile || !window.turnstile.render) { return; }
+    installed = true;
+    const real = window.turnstile.render.bind(window.turnstile);
+    window.turnstile.render = (container, params) => {
+      grab(params || {});
+      return real(container, params);
+    };
+  };
+  const timer = setInterval(() => {
+    install();
+    if (installed) { clearInterval(timer); }
+  }, 10);
+  // Stop watching after 30s; a page that has not rendered one by then is not
+  // going to, and a forever-timer in every document is its own bug.
+  setTimeout(() => clearInterval(timer), 30000);
+})()
+"""
+
+# Read back whatever the interception captured. Returns null when no
+# Turnstile rendered, which is the ordinary case on a page that is fine.
+TURNSTILE_DISCOVERY_JS = """
+() => {
+  if (window.__tsParams) { return window.__tsParams; }
+  const el = document.querySelector('.cf-turnstile[data-sitekey], [data-sitekey][class*="cf-turnstile"]');
+  if (el) {
+    return {
+      sitekey: el.getAttribute('data-sitekey'),
+      action: el.getAttribute('data-action') || null,
+      cData: null, chlPageData: null,
+      pageurl: window.location.href
+    };
+  }
+  return null;
+}
+"""
+
+# Hand the token back the way Turnstile expects: the named input, the
+# reCAPTCHA-compatibility input, and the page's own callback if the
+# interception kept one.
+TURNSTILE_INJECT_JS = """
+(token) => {
+  const setField = (name) => {
+    let el = document.querySelector(`[name="${name}"]`);
+    if (!el) {
+      el = document.createElement('input');
+      el.type = 'hidden';
+      el.name = name;
+      document.body.appendChild(el);
+    }
+    el.value = token;
+  };
+  setField('cf-turnstile-response');
+  setField('g-recaptcha-response');
+  let calledBack = false;
+  try {
+    if (typeof window.__tsCallback === 'function') {
+      window.__tsCallback(token);
+      calledBack = true;
+    }
+  } catch (e) { /* best effort */ }
+  return calledBack;
+}
+"""
+
+
+# How long to wait for Cloudflare to call `turnstile.render`. Measured: two
+# navigations to the same Challenge page seconds apart, one capturing nothing
+# and one capturing everything — so the render is not prompt and a single read
+# is a coin toss. Six seconds at half-second steps covers it without making a
+# page that has no Turnstile pay for the privilege.
+TURNSTILE_WAIT_SECONDS = 6.0
+TURNSTILE_POLL_SECONDS = 0.5
+
+
+def wait_for_turnstile(evaluate, sleep, page_url: str = "",
+                       timeout_s: float = TURNSTILE_WAIT_SECONDS
+                       ) -> Optional[CaptchaChallenge]:
+    """`detect_turnstile_in_page`, but give the render a chance to happen.
+
+    Returns as soon as a challenge with a sitekey is available, so the wait
+    costs nothing on a page that renders one promptly and nothing at all on a
+    page that has none — the first pass already returns None and the caller
+    decides whether to keep waiting.
+
+    `sleep` takes SECONDS, matching each engine's own idle primitive rather
+    than importing time here.
+    """
+    waited = 0.0
+    best = None
+    while True:
+        challenge = detect_turnstile_in_page(evaluate, page_url=page_url)
+        if challenge and challenge.sitekey:
+            # A Challenge page needs the intercepted parameters; a standalone
+            # widget does not. Keep waiting for the former, take the latter.
+            if challenge.is_cloudflare_challenge or waited >= timeout_s:
+                return challenge
+            best = challenge
+        if waited >= timeout_s:
+            return best
+        sleep(TURNSTILE_POLL_SECONDS)
+        waited += TURNSTILE_POLL_SECONDS
+
+
+def detect_turnstile_in_page(evaluate, page_url: str = "") -> Optional[CaptchaChallenge]:
+    """A Turnstile read out of the LIVE page, parameters included.
+
+    `evaluate` runs `TURNSTILE_DISCOVERY_JS` and returns its result — the
+    same contract as `detect_recaptcha_in_page`, so each engine spells it in
+    its own driver's dialect and no JavaScript crosses a module boundary in
+    the other direction.
+
+    This is the only path that can produce a solvable CHALLENGE PAGE, and it
+    can only do so if `TURNSTILE_INTERCEPT_JS` was installed on the document
+    before Cloudflare's script ran.
+    """
+    try:
+        info = evaluate(TURNSTILE_DISCOVERY_JS)
+    except Exception as e:  # noqa: BLE001 - any engine's evaluate can raise
+        logger.debug("In-page Turnstile discovery failed: %s", e)
+        return None
+    if not info or not info.get("sitekey"):
+        return None
+    challenge = CaptchaChallenge(
+        kind="turnstile",
+        sitekey=info["sitekey"],
+        action=info.get("action") or "",
+        page_url=info.get("pageurl") or page_url,
+        source="runtime",
+        cdata=info.get("cData"),
+        pagedata=info.get("chlPageData"),
+    )
+    logger.info("Turnstile found at runtime: sitekey=%s action=%s "
+                "cData=%s chlPageData=%s (%s)",
+                challenge.sitekey, challenge.action or None,
+                "yes" if challenge.cdata else "no",
+                "yes" if challenge.pagedata else "no",
+                "Cloudflare Challenge page" if challenge.is_cloudflare_challenge
+                else "standalone widget")
+    return challenge
+
+
+def turnstile_task_for(challenge: CaptchaChallenge) -> dict:
+    """Build the 2captcha task for a Turnstile.
+
+    `action`, `data` and `pagedata` are optional for a standalone widget and
+    REQUIRED for a Challenge page — so they are sent when the interception
+    captured them and omitted when it did not, rather than sent empty.
+    """
+    if not challenge.sitekey:
+        # A Challenge page publishes no sitekey in its markup — the widget is
+        # rendered by script — so a static detection can legitimately come
+        # back without one. 2captcha rejects a task with an empty
+        # `websiteKey`, so building it anyway would be a request that cannot
+        # succeed. Refuse here instead, and say what would fix it.
+        raise CaptchaUnsolvable(
+            "a Turnstile was detected but no sitekey is available. On a "
+            "Cloudflare Challenge page the key arrives as an argument to "
+            "turnstile.render, so TURNSTILE_INTERCEPT_JS has to be installed "
+            "on the document BEFORE Cloudflare's script runs — see the "
+            "engines' context setup.")
+    task = {
+        "type": "TurnstileTaskProxyless",
+        "websiteURL": challenge.page_url,
+        "websiteKey": challenge.sitekey,
+    }
+    if challenge.action:
+        task["action"] = challenge.action
+    if challenge.cdata:
+        task["data"] = challenge.cdata
+    if challenge.pagedata:
+        task["pagedata"] = challenge.pagedata
+    return task
 
 
 INJECT_TOKEN_JS = """

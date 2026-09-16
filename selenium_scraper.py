@@ -59,7 +59,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             reconcile_detections, solve_recaptcha,
-                            CaptchaUnsolvable, INJECT_TOKEN_JS)
+                            CaptchaUnsolvable, INJECT_TOKEN_JS,
+                            detect_turnstile, wait_for_turnstile,
+                            TURNSTILE_INTERCEPT_JS, TURNSTILE_INJECT_JS)
 from product_parser import (parse_products, SELECTORS, detect_bot_challenge,
                             page_url, paginates_by_url, listing_kind,
                             site_host, is_supported_host, total_results,
@@ -260,6 +262,18 @@ class _Session:
             # Set over CDP rather than as a launch switch, so it can use the
             # version the driver actually reports.
             try:
+                # Before any of the page's own script runs. Chromium's CDP
+                # equivalent of Playwright's add_init_script: without it a
+                # Cloudflare Challenge page is detectable and unsolvable,
+                # because turnstile.render's arguments exist nowhere else.
+                try:
+                    self.driver.execute_cdp_cmd(
+                        "Page.addScriptToEvaluateOnNewDocument",
+                        {"source": TURNSTILE_INTERCEPT_JS})
+                except WebDriverException as e:
+                    logger.debug("Could not install the Turnstile "
+                                 "interception: %s", e)
+
                 self.driver.execute_cdp_cmd(
                     "Network.setUserAgentOverride",
                     {"userAgent": _chrome_ua(version)})

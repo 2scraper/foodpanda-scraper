@@ -598,40 +598,50 @@ BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
     # The container itself, which the denial page carries seven times and
     # which is enough to know a widget is present even if the loader moves.
     'class="g-recaptcha"',
+    # CLOUDFLARE TURNSTILE, including the Challenge page. Solved end to end
+    # on 2026-09-16: the interception captured sitekey, action `managed`,
+    # cData and chlPageData from foodpanda.com's own challenge, 2captcha
+    # returned an 837-character token in 11 seconds for $0.00145, and the
+    # page came back as the real site.
+    #
+    # Note what it takes: `captcha_solver.TURNSTILE_INTERCEPT_JS` must be
+    # installed on the context BEFORE the page's script runs, because
+    # `turnstile.render`'s arguments exist nowhere else. An engine that has
+    # not installed it will detect the widget and be unable to solve it, and
+    # says so rather than buying a task that cannot succeed.
+    #
+    # `cf-turnstile` is deliberately NOT here, and the reason is measured:
+    # it appears once on a SERVED Hong Kong listing — 2Captcha's Scraping
+    # Browser auto-solve extension injects
+    # `chrome-extension://…/content/captcha/turnstile/hunter.js` with
+    # `data-ts-input="cf-turnstile-response"` into every page it loads — and
+    # ZERO times on the real Cloudflare challenge. A marker that fires on
+    # good pages and misses the bad one is worse than no marker (§18), and
+    # this is §8's extension trap arriving for real.
+    "challenges.cloudflare.com",
 )
 
-# Challenges this repo has no solver for. Each is a real 2captcha product —
-# Turnstile especially — so the entry means "not implemented here", not
-# "impossible":
-#
-#   Cloudflare Turnstile   2captcha solves it (`TurnstileTaskProxyless`), but
-#                          the task needs `cData` / `chlPageData` intercepted
-#                          from the page before the widget loads, which this
-#                          repo does not do. It also never comes up in
-#                          practice: Cloudflare's managed challenge is what a
-#                          NON-browser client gets, and every engine here
-#                          drives a real browser.
-#   hCaptcha, DataDome     likewise solvable by 2captcha, not wired up here.
+# Challenges this repo has no solver for. Both are real 2captcha products,
+# so the entry means "not implemented here" rather than "impossible" — and
+# neither has ever been seen on foodpanda.
 #
 # Listed so a page carrying one is reported as `blocked` rather than having a
 # solve attempted and billed for a task this code cannot build (§8: detected
 # != blocking != paying).
 UNSOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
-    "challenges.cloudflare.com",
     "hcaptcha.com/captcha",
     "geo.captcha-delivery.com",
     "datadome",
 )
 
-# Kept for the README's benefit rather than the code's: these are the ordinary
-# loaders, and the set exists so a reader can see at a glance what the
-# non-enterprise path looks like. Deliberately not consulted — a marker set
-# that is checked but can never change an outcome is dead code wearing a
-# policy's clothes (§17).
-WOULD_BE_SOLVABLE_MARKERS: Tuple[str, ...] = (
-    "recaptcha/api.js",
-    "recaptcha/api2/anchor",
-    "recaptcha/api2/bframe",
+# Every captcha product this repo can actually solve, for a reader who wants
+# the list in one place. Consulted by nothing — the marker set above is what
+# decides — so it is documentation that happens to live in code.
+SOLVABLE_PRODUCTS = (
+    "reCAPTCHA v2 (checkbox and invisible)",
+    "reCAPTCHA v3",
+    "reCAPTCHA v2/v3 Enterprise",
+    "Cloudflare Turnstile, standalone and on a Challenge page",
 )
 
 _SITEKEY_RE = re.compile(r'data-sitekey="([^"]+)"')
@@ -706,10 +716,19 @@ def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
     for marker in UNSOLVABLE_CHALLENGE_MARKERS:
         if marker in lowered:
             return None
+    # Named rather than returned as a bare True, because the three want
+    # different task types and a log line that says which one is the
+    # difference between a solve that works and one paid for twice.
+    if "recaptcha/enterprise" in lowered:
+        return "recaptcha_enterprise"
+    # `cf-turnstile` is NOT tested here either — see BOT_CHALLENGE_MARKERS
+    # for the measurement. Cloudflare's own host is what identifies a real
+    # challenge.
+    if "challenges.cloudflare.com" in lowered:
+        return "turnstile"
     for marker in BOT_CHALLENGE_MARKERS:
         if marker.lower() in lowered:
-            return ("recaptcha_enterprise" if "recaptcha/enterprise" in lowered
-                    else "recaptcha")
+            return "recaptcha"
     return None
 
 
@@ -721,9 +740,6 @@ def unsolvable_challenge(html: str) -> Optional[str]:
     steps.
     """
     lowered = (html or "").lower()
-    if "challenges.cloudflare.com" in lowered:
-        return ("Cloudflare Turnstile (2captcha solves it; this repo does not "
-                "implement the task)")
     for marker in UNSOLVABLE_CHALLENGE_MARKERS:
         if marker in lowered:
             return marker

@@ -56,7 +56,9 @@ from pyppeteer import launch, connect
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             reconcile_detections, solve_recaptcha,
-                            CaptchaUnsolvable, INJECT_TOKEN_JS)
+                            CaptchaUnsolvable, INJECT_TOKEN_JS,
+                            detect_turnstile, wait_for_turnstile,
+                            TURNSTILE_INTERCEPT_JS, TURNSTILE_INJECT_JS)
 from product_parser import (parse_products, SELECTORS, detect_bot_challenge,
                             page_url, paginates_by_url, listing_kind,
                             site_host, is_supported_host, total_results,
@@ -327,6 +329,15 @@ class _Session:
                    handleSIGTERM=False, handleSIGHUP=False, **launch_kwargs),
             timeout=CONNECT_TIMEOUT * 2)
         self.page = self.bridge.run(self.browser.newPage())
+        # Before any of the page's own script runs. `turnstile.render`'s
+        # arguments — cData, chlPageData, action — exist only inside that one
+        # call, and a Cloudflare Challenge page cannot be solved without
+        # them. pyppeteer's equivalent of Playwright's add_init_script.
+        try:
+            self.bridge.run(
+                self.page.evaluateOnNewDocument(TURNSTILE_INTERCEPT_JS))
+        except Exception as e:  # noqa: BLE001 — never block a run on this
+            logger.debug("Could not install the Turnstile interception: %s", e)
         version = self.bridge.run(self.browser.version())
         self.bridge.run(self.page.setUserAgent(_chrome_ua(version)))
         self.bridge.run(self.page.setViewport({"width": 1600, "height": 1000}))

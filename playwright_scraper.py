@@ -104,7 +104,9 @@ from playwright.sync_api import (sync_playwright, Error as PWError,
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             reconcile_detections, solve_recaptcha,
                             CaptchaUnsolvable, INJECT_TOKEN_JS,
-                            RECAPTCHA_DISCOVERY_JS)
+                            RECAPTCHA_DISCOVERY_JS, detect_turnstile,
+                            wait_for_turnstile, TURNSTILE_INTERCEPT_JS,
+                            TURNSTILE_INJECT_JS)
 from product_parser import (parse_products, SELECTORS, detect_bot_challenge,
                             page_url, paginates_by_url, listing_kind,
                             site_host, is_supported_host, total_results,
@@ -462,6 +464,15 @@ def _launch_local(pw, args, pool):
     if init_script:
         # Must be installed on the context, before any page script runs.
         context.add_init_script(init_script)
+    # THE ONLY MOMENT Turnstile's parameters can be captured. Cloudflare's
+    # Challenge page calls `turnstile.render(container, params)` once and
+    # keeps nothing; `cData`, `chlPageData` and `action` live only in that
+    # call, and 2captcha needs all three. Installed on the CONTEXT so it
+    # covers every document, including the one a redirect lands on.
+    #
+    # Harmless where there is no Turnstile: it wraps a function that never
+    # appears and stops watching after 30 seconds.
+    context.add_init_script(TURNSTILE_INTERCEPT_JS)
     return browser, context, context.new_page()
 
 
@@ -704,6 +715,26 @@ def handle_captcha_if_present(page, args) -> bool:
         lambda js: page.evaluate(js), page_url=page.url)
     challenge = reconcile_detections(html_challenge, runtime_challenge)
     if not challenge:
+        # No reCAPTCHA. Turnstile is the other thing 2captcha can solve, and
+        # the RUNTIME reading is the one that matters: a Cloudflare Challenge
+        # page publishes no sitekey in its markup, so only the interception
+        # installed at context creation can produce a solvable challenge.
+        # The static read is kept as the fallback for a standalone widget,
+        # whose sitekey IS in the markup.
+        challenge = (wait_for_turnstile(lambda js: page.evaluate(js),
+                                        lambda s: page.wait_for_timeout(s * 1000),
+                                        page_url=page.url)
+                     or detect_turnstile(html, page.url))
+        if challenge and not challenge.sitekey:
+            logger.warning(
+                "A Cloudflare Turnstile is on this page but no sitekey was "
+                "captured, so it cannot be solved. That means the page "
+                "rendered its widget before this run's interception script "
+                "was installed — which should not happen on a page this "
+                "engine navigated to, and does happen if the browser was "
+                "attached to mid-flight.")
+            return False
+    if not challenge:
         return False
 
     if when_blocked and already_rendered > MIN_CARD_MATCHES:
@@ -729,7 +760,22 @@ def handle_captcha_if_present(page, args) -> bool:
                      "whatever the page holds.", e)
         return False
 
-    page.evaluate(INJECT_TOKEN_JS, token)
+    if challenge.is_turnstile:
+        # Turnstile hands its token back through `cf-turnstile-response` and
+        # the page's own callback, not through `g-recaptcha-response` and
+        # grecaptcha's client registry.
+        called_back = page.evaluate(TURNSTILE_INJECT_JS, token)
+        logger.info("Turnstile token injected%s.",
+                    " and handed to the page's callback" if called_back
+                    else " (no callback was captured — relying on the form "
+                         "field)")
+        if challenge.solved_user_agent:
+            logger.info("2captcha solved it against user agent %r. Cloudflare "
+                        "checks that on a Challenge page, so a mismatch here "
+                        "is the likeliest reason a paid token is refused.",
+                        challenge.solved_user_agent[:60] + "…")
+    else:
+        page.evaluate(INJECT_TOKEN_JS, token)
     logger.info("Token injected. Reloading page to continue.")
     page.wait_for_timeout(1500)
     page.reload(wait_until="domcontentloaded", timeout=60000)
