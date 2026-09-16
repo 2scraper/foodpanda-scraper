@@ -588,12 +588,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # after a few seconds. What clears it is a NEW session, which the
         # retry loop above already does by relaunching the browser.
         #
-        # The paid path is reached for state "challenge", which NOTHING ON
-        # THIS SITE reaches today: the only challenge foodpanda renders is
-        # reCAPTCHA Enterprise, which captcha_solver.py does not implement,
-        # so such a page is classified "blocked" and no solve is attempted or
-        # billed. Bounded by SOLVES_PER_PAGE regardless, so a path that
-        # becomes reachable after a site change cannot become a bill.
+        # The paid path is reached for state "challenge", which on this site
+        # is PerimeterX's denial page when it renders its reCAPTCHA
+        # Enterprise widget. That solve WORKS — measured ~55s and $0.00299,
+        # after which the page came back with its grid, against a control
+        # where a plain reload cleared the same block 0 of 8 times.
+        #
+        # Reached only AFTER the free re-roll has had its turn, because the
+        # refusal is per-session and a fresh browser clears it for nothing.
+        # Bounded by SOLVES_PER_PAGE so a page that keeps coming back as a
+        # challenge cannot buy one solve per rotation.
         if (page_flow.should_solve(state)
                 and solves_bought < page_flow.SOLVES_PER_PAGE):
             solves_bought += 1

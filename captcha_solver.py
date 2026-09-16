@@ -9,20 +9,33 @@ sign-in, checkout, anything) — this is deliberate, not scoped to any one
 page. If foodpanda renders a reCAPTCHA challenge anywhere — account,
 sign-in and checkout flows are the usual places — this fires.
 
-**A CHALLENGE IS RENDERED ON THIS SITE, AND THIS MODULE CANNOT SOLVE IT.**
-PerimeterX's denial page carries a `g-recaptcha` container that looks like an
-ordinary v2 checkbox, and the loader beside it is
-`https://www.google.com/recaptcha/enterprise.js` — measured on four denial
+**THIS MODULE IS LOAD-BEARING ON THIS SITE.** PerimeterX's denial page
+carries a `g-recaptcha` container that looks like an ordinary v2 checkbox,
+and the loader beside it is the ENTERPRISE API —
+`https://www.google.com/recaptcha/enterprise.js`, measured on four denial
 documents across two country sites, with zero occurrences of
-`recaptcha/api.js` on any of them. This module implements v2 and v3 and NOT
-the enterprise method, so `product_parser.detect_bot_challenge` returns None
-for those pages, the state is `blocked` rather than `challenge`, and no solve
-is attempted or billed. See the README.
+`recaptcha/api.js` on any of them.
 
-So this module is a contingency on this site rather than part of the happy
-path
-— a bot manager can be switched on between deploys, and a scraper that
-cannot name what stopped it is much harder to fix.
+Solved, end to end, 2026-09-16: `RecaptchaV2EnterpriseTaskProxyless`, ~55
+seconds, $0.00299, and the refused page came back with its full grid. The
+control matters as much as the result — reloading a denial page in the same
+session WITHOUT solving cleared it 0 of 8 times, so the token is what got in.
+
+Two things decide whether that money buys anything:
+
+  * **the task type.** An enterprise widget solved as ordinary v2 returns a
+    token the site rejects. `CaptchaChallenge.enterprise` carries the page's
+    own answer — its loader, and `window.grecaptcha.enterprise` — into
+    `_v2_task_for`.
+  * **the variant.** The first live attempt read a bframe with no `size` as
+    v3, bought a `RecaptchaV3TaskProxyless` and got
+    ERROR_CAPTCHA_UNSOLVABLE after 87 seconds. v3 renders no challenge frame
+    at all, so a frame present now settles it as a v2 checkbox.
+
+It is still not the FIRST thing to reach for: this site's refusal is
+per-session, and a fresh browser clears it for nothing. Hence
+`--solve-captcha when-blocked` as the default, with the retry budget ahead of
+any spending.
 
 Detection therefore stays BROAD (which challenge a visitor meets depends on
 the exit and on what the address has been doing) while spending stays
@@ -148,6 +161,16 @@ class CaptchaChallenge:
     # Raw `size` from the reCAPTCHA client config, when available:
     # "invisible" for v2-invisible and for v3, absent for a v2 checkbox.
     size: Optional[str] = None
+    # Whether the page loads reCAPTCHA through the ENTERPRISE API rather than
+    # the ordinary one. 2captcha has a separate task type for it
+    # (`RecaptchaV2EnterpriseTaskProxyless`), and sending the ordinary type
+    # for an enterprise widget buys a token the site rejects — so this has to
+    # travel with the challenge rather than be guessed at solve time.
+    #
+    # Detected two ways, because they can each be present without the other:
+    # the static markup loads `recaptcha/enterprise.js`, and the live page
+    # exposes `window.grecaptcha.enterprise`.
+    enterprise: bool = False
 
     @property
     def is_v3(self) -> bool:
@@ -156,6 +179,17 @@ class CaptchaChallenge:
     @property
     def is_invisible_v2(self) -> bool:
         return self.kind == "recaptcha_v2_invisible"
+
+
+# The enterprise API's own loader. `api.js` is the ordinary one; a page that
+# loads THIS is an enterprise widget however much its container looks like an
+# ordinary v2 checkbox — which is exactly what foodpanda's refusal looks like.
+_ENTERPRISE_LOADER_RE = re.compile(
+    r"recaptcha/enterprise\.js|grecaptcha\.enterprise", re.I)
+
+
+def _is_enterprise_html(html: str) -> bool:
+    return bool(_ENTERPRISE_LOADER_RE.search(html or ""))
 
 
 def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
@@ -193,7 +227,37 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
                 sitekey=sitekey_match.group(1),
                 action=action,
                 page_url=page_url,
+                enterprise=_is_enterprise_html(html),
             )
+
+    # THE PLAIN v2 CONTAINER, which is what this site serves and what the
+    # rest of this function could not see. `<div class="g-recaptcha"
+    # data-sitekey="…" data-callback="…">` is the documented checkbox markup
+    # and carries no `grecaptcha` identifier at all, so the bail-out below
+    # used to discard it — leaving the static detector blind to the only
+    # widget this repo meets, and a reader debugging from a `--dump-html`
+    # capture with nothing to look at.
+    #
+    # Checked BEFORE the bail-out for that reason, and after the v3 shapes
+    # above so a genuine v3 integration still wins.
+    container = re.search(
+        r'class=["\'][^"\']*\bg-recaptcha\b[^"\']*["\'][^>]*'
+        r'data-sitekey=["\']([\w-]{20,})["\']'
+        r"|data-sitekey=[\"']([\w-]{20,})[\"'][^>]*"
+        r'class=["\'][^"\']*\bg-recaptcha\b',
+        html)
+    if container:
+        sitekey = container.group(1) or container.group(2)
+        enterprise = _is_enterprise_html(html)
+        # `data-size="invisible"` is the invisible variant of the same
+        # container; without it this is the checkbox.
+        invisible = re.search(r'data-size=["\']invisible["\']', html) is not None
+        return CaptchaChallenge(
+            kind="recaptcha_v2_invisible" if invisible else "recaptcha_v2",
+            sitekey=sitekey,
+            page_url=page_url,
+            enterprise=enterprise,
+        )
 
     if "grecaptcha" not in html:
         return None
@@ -208,11 +272,15 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
             sitekey=exec_match.group(1),
             action=exec_match.group(2),
             page_url=page_url,
+            enterprise=_is_enterprise_html(html),
         )
 
     key_match = re.search(r"data-sitekey=['\"]([\w-]{20,})['\"]", html)
     if key_match and "grecaptcha.render" in html:
-        return CaptchaChallenge(kind="recaptcha_v3", sitekey=key_match.group(1), page_url=page_url)
+        return CaptchaChallenge(kind="recaptcha_v3",
+                                sitekey=key_match.group(1),
+                                page_url=page_url,
+                                enterprise=_is_enterprise_html(html))
 
     return None
 
@@ -354,6 +422,11 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
         labelled `data-version="v3"`.
       * `size == "invisible"` with no challenge frame is treated as v3,
         which is v3's normal appearance (badge only).
+      * an interactive bframe present with NO size and NO render parameter is
+        a **v2 checkbox**. v3 never renders a challenge frame, so the frame
+        alone rules it out. foodpanda's PerimeterX denial page is exactly
+        this shape, and before this rung existed it was classified v3 and a
+        solve was bought against the wrong task type.
       * a `normal`/`compact` size is a v2 checkbox.
     When the two signals disagree the ambiguity is recorded in the returned
     challenge's `kind` and in the log, rather than silently guessing — pick
@@ -391,6 +464,18 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
         kind = "recaptcha_v2"
     elif info.get("challengeFrame") and size == "invisible":
         kind = "recaptcha_v2_invisible"
+    elif info.get("challengeFrame"):
+        # A bframe with NO size and NO render parameter. v3 renders no
+        # challenge frame at all — it is a badge and a token — so a frame
+        # being present rules v3 out whatever else is missing.
+        #
+        # This rung was absent, and its absence cost a real solve: foodpanda's
+        # denial page (enterprise loader, no render, no size, checkbox markup,
+        # bframe) fell through to the `else` below, bought a
+        # RecaptchaV3TaskProxyless, and came back ERROR_CAPTCHA_UNSOLVABLE
+        # after 87 seconds — the exact "wrong variant buys a rejected token"
+        # failure this function's docstring warns about.
+        kind = "recaptcha_v2"
     else:
         kind = "recaptcha_v3"
 
@@ -400,8 +485,8 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
                 kind, info["sitekey"], size, render, info.get("challengeFrame"),
                 info.get("containerId"), "; ".join(hints))
     if info.get("enterprise"):
-        logger.warning("This is a reCAPTCHA ENTERPRISE widget — 2captcha needs its "
-                       "enterprise method, which this project does not implement.")
+        logger.info("This is a reCAPTCHA ENTERPRISE widget — solving it through "
+                    "2captcha's enterprise task type.")
 
     return CaptchaChallenge(
         kind=kind,
@@ -410,6 +495,7 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
         page_url=page_url,
         source="runtime",
         size=size,
+        enterprise=bool(info.get("enterprise")),
     )
 
 
@@ -474,6 +560,18 @@ def _v2_task_for(challenge: CaptchaChallenge, min_score: float) -> dict:
       * v2 invisible -> RecaptchaV2TaskProxyless with isInvisible: true
       * v2 checkbox  -> RecaptchaV2TaskProxyless
 
+    and the ENTERPRISE variants of the same, which are a different task type
+    rather than a flag on these:
+      * v2 enterprise -> RecaptchaV2EnterpriseTaskProxyless
+      * v3 enterprise -> RecaptchaV3TaskProxyless with isEnterprise: true
+
+    Getting that wrong is not cosmetic. An enterprise widget solved through
+    the ordinary task type comes back with a token the site rejects — you pay
+    and gain nothing — which is the shape of failure this whole module exists
+    to avoid. `challenge.enterprise` is set from the page's own loader and
+    from `window.grecaptcha.enterprise`, so the decision is the page's rather
+    than ours.
+
     The `*Proxyless` types let 2captcha use its OWN IP pool, which is the
     right trade for reCAPTCHA: a v2/v3 token is not bound to the address that
     produced it, so the solve and the submission may leave from different
@@ -493,6 +591,8 @@ def _v2_task_for(challenge: CaptchaChallenge, min_score: float) -> dict:
             "websiteKey": challenge.sitekey,
             "minScore": score,
         }
+        if challenge.enterprise:
+            task["isEnterprise"] = True
         # v3 scores partly on the action, so send it when it's a real one.
         # "verify" is this module's placeholder for "the page didn't say".
         if challenge.action and challenge.action != "verify":
@@ -500,12 +600,20 @@ def _v2_task_for(challenge: CaptchaChallenge, min_score: float) -> dict:
         return task
 
     task = {
-        "type": "RecaptchaV2TaskProxyless",
+        "type": ("RecaptchaV2EnterpriseTaskProxyless" if challenge.enterprise
+                 else "RecaptchaV2TaskProxyless"),
         "websiteURL": challenge.page_url,
         "websiteKey": challenge.sitekey,
     }
     if challenge.is_invisible_v2:
         task["isInvisible"] = True
+    if challenge.enterprise and challenge.action \
+            and challenge.action != "verify":
+        # `enterprisePayload` carries whatever the site passes to
+        # `grecaptcha.enterprise.render` — most often an `s` value. Only the
+        # action is available from detection here; a site that needs more
+        # would need it read off the page and threaded through the same way.
+        task["enterprisePayload"] = {"s": challenge.action}
     return task
 
 

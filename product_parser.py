@@ -568,57 +568,66 @@ CLOUDFLARE_MARKERS: Tuple[str, ...] = (
     "Just a moment...",
 )
 
-# What this repo can actually pay to have solved — and on this site the
-# answer is NOTHING, which was learned the expensive way.
+# What this repo can actually pay to have solved.
 #
-# PerimeterX's denial document renders what LOOKS like a reCAPTCHA v2
-# checkbox:
+# PerimeterX's denial document renders a v2-shaped container whose LOADER is
+# the enterprise API:
 #
 #   <div id="px-captcha">
 #     <div class="g-recaptcha" data-sitekey="6Lc…" data-callback="handleCaptcha">
-#
-# and on that evidence alone this repo first classified a refusal as a
-# solvable `challenge`. The LOADER beside it says otherwise, and the loader
-# wins — §8's rule about reconciling captcha detectors rather than
-# short-circuiting them, arriving in a new costume:
-#
 #   <script src="https://www.google.com/recaptcha/enterprise.js?hl=en-US">
 #
 # Measured on four denial documents — foodpanda.pk and foodpanda.sg, a vendor
 # page and a listing page, captures hours apart: 3, 3, 3 and 2 occurrences of
-# `recaptcha/enterprise`, and ZERO occurrences of `recaptcha/api.js` on any of
-# them. The runtime detector agrees independently: `___grecaptcha_cfg` reports
-# `enterprise: true` on the live page.
+# `recaptcha/enterprise`, ZERO of `recaptcha/api.js` on any of them, and the
+# live page's own `___grecaptcha_cfg` reports `enterprise: true`.
 #
-# `captcha_solver.py` implements reCAPTCHA v2 and v3 and not the enterprise
-# method, so a solve here would be charged for and would buy a token the site
-# rejects. The set below is therefore EMPTY, and the emptiness is the
-# measurement — not an oversight, and not a placeholder waiting to be filled.
-#
-# Named `BOT_CHALLENGE_MARKERS` because that is what the family calls this
-# set, and `scraper_api_client.py` imports it by that name.
-BOT_CHALLENGE_MARKERS: Tuple[str, ...] = ()
-
-# What a refusal on this site actually renders, and why no solve is
-# attempted for it. Checked BEFORE anything else, so a page carrying both the
-# v2-shaped container and the enterprise loader is correctly called
-# unsolvable rather than incorrectly called solvable.
-UNSOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
-    # THE one that matters here.
+# THAT IS SOLVABLE. 2captcha has a task type for it —
+# `RecaptchaV2EnterpriseTaskProxyless` — and `captcha_solver.py` builds it
+# when the page says enterprise. The distinction that matters is the TASK
+# TYPE, not whether a solve is possible: sending the ordinary
+# `RecaptchaV2TaskProxyless` for an enterprise widget buys a token the site
+# rejects, which is why the flag travels with the challenge.
+BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
+    # The enterprise loader, which is what this site actually serves.
     "recaptcha/enterprise",
-    # Forward-looking: vendors this repo has no solver for either. None has
-    # ever been seen on foodpanda.
+    # The ordinary loaders, for the day it changes back.
+    "recaptcha/api.js",
+    "recaptcha/api2/anchor",
+    "recaptcha/api2/bframe",
+    # The container itself, which the denial page carries seven times and
+    # which is enough to know a widget is present even if the loader moves.
+    'class="g-recaptcha"',
+)
+
+# Challenges this repo has no solver for. Each is a real 2captcha product —
+# Turnstile especially — so the entry means "not implemented here", not
+# "impossible":
+#
+#   Cloudflare Turnstile   2captcha solves it (`TurnstileTaskProxyless`), but
+#                          the task needs `cData` / `chlPageData` intercepted
+#                          from the page before the widget loads, which this
+#                          repo does not do. It also never comes up in
+#                          practice: Cloudflare's managed challenge is what a
+#                          NON-browser client gets, and every engine here
+#                          drives a real browser.
+#   hCaptcha, DataDome     likewise solvable by 2captcha, not wired up here.
+#
+# Listed so a page carrying one is reported as `blocked` rather than having a
+# solve attempted and billed for a task this code cannot build (§8: detected
+# != blocking != paying).
+UNSOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
+    "challenges.cloudflare.com",
     "hcaptcha.com/captcha",
     "geo.captcha-delivery.com",
     "datadome",
 )
 
-# Kept as a separate, currently-unused set so that the day foodpanda swaps
-# the enterprise loader for the ordinary one, the change is a one-line move
-# rather than a rewrite — and so a reader can see exactly what WOULD be
-# solvable. Deliberately not wired into `detect_bot_challenge`: a marker set
-# that is consulted but can never match is dead code wearing a policy's
-# clothes (§17).
+# Kept for the README's benefit rather than the code's: these are the ordinary
+# loaders, and the set exists so a reader can see at a glance what the
+# non-enterprise path looks like. Deliberately not consulted — a marker set
+# that is checked but can never change an outcome is dead code wearing a
+# policy's clothes (§17).
 WOULD_BE_SOLVABLE_MARKERS: Tuple[str, ...] = (
     "recaptcha/api.js",
     "recaptcha/api2/anchor",
@@ -674,17 +683,24 @@ def challenge_sitekey(html: str) -> Optional[str]:
 def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
     """The SOLVABLE challenge this page rendered, or None.
 
-    ALWAYS None on foodpanda today, and that is a measurement rather than a
-    stub: the only challenge this site renders is reCAPTCHA Enterprise, which
-    `captcha_solver.py` does not implement. Returning None is what keeps a
-    solve from being attempted and charged for a token the site would reject
-    (§8: detected != blocking != paying).
+    On foodpanda this fires for PerimeterX's denial page WHEN IT CARRIES A
+    WIDGET: a v2-shaped `g-recaptcha` container loaded through the enterprise
+    API, which `captcha_solver.py` solves with 2captcha's enterprise task
+    type. The state is then `challenge`, and a solve is a real way through
+    rather than a gesture.
 
-    The function is kept — rather than deleted — because `page_flow` and all
-    three engines ask it, and because the day the site swaps the enterprise
-    loader for the ordinary one this is the single place that changes. Its
-    emptiness is asserted by the offline suite against a real denial capture,
-    so a future edit that makes it return something has to be deliberate.
+    It does NOT fire for two things, and the difference is the whole point:
+
+      * PerimeterX's stub — the 4.7 KB denial variant with 24 `px-captcha`
+        references and no widget of any kind. Nothing on that page is
+        solvable by anybody, at any price.
+      * Cloudflare's managed challenge, which 2captcha CAN solve
+        (`TurnstileTaskProxyless`) but this repo does not implement, because
+        the task needs parameters intercepted from the page before the widget
+        loads — and because a browser engine never meets it anyway.
+
+    Both come back `blocked`, so nothing is attempted or billed for a task
+    this code cannot build.
     """
     lowered = (html or "").lower()
     for marker in UNSOLVABLE_CHALLENGE_MARKERS:
@@ -692,24 +708,29 @@ def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
             return None
     for marker in BOT_CHALLENGE_MARKERS:
         if marker.lower() in lowered:
-            return marker
+            return ("recaptcha_enterprise" if "recaptcha/enterprise" in lowered
+                    else "recaptcha")
     return None
 
 
 def unsolvable_challenge(html: str) -> Optional[str]:
-    """The challenge this page rendered that this repo CANNOT solve, or None.
+    """What this page carries that this repo cannot solve, or None.
 
-    Exists so a log line can say "reCAPTCHA Enterprise, which this project
-    does not implement" instead of a bare "blocked" — which is the difference
-    between a reader who understands their options and one who buys a
-    2Captcha key expecting it to help.
+    Names the thing rather than shrugging, because "blocked" and "blocked by
+    a Turnstile we have not implemented" lead a reader to different next
+    steps.
     """
     lowered = (html or "").lower()
-    if "recaptcha/enterprise" in lowered:
-        return "reCAPTCHA Enterprise"
+    if "challenges.cloudflare.com" in lowered:
+        return ("Cloudflare Turnstile (2captcha solves it; this repo does not "
+                "implement the task)")
     for marker in UNSOLVABLE_CHALLENGE_MARKERS:
         if marker in lowered:
             return marker
+    if detect_block_marker(html) == "PerimeterX" \
+            and not detect_bot_challenge(html):
+        return ("PerimeterX's stub, which renders no widget at all — there is "
+                "nothing here for any solver to work on")
     return None
 
 

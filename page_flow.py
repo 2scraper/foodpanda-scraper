@@ -10,17 +10,15 @@ written three times inside three engines and drifting apart (§1):
                from a page still painting unless you look for its title
     shell      served, built out of the site's own assets, grid not there
                yet. Wants a WAIT, not a refetch
-    challenge  a challenge this repo could actually solve. NOTHING ON THIS
-               SITE REACHES IT TODAY, and that is measured rather than
-               hopeful: PerimeterX's denial page renders a v2-shaped
-               `g-recaptcha` container whose LOADER is
-               `recaptcha/enterprise.js`, which captcha_solver.py does not
-               implement. The state is kept because the day the site swaps
-               that loader, one line in product_parser.py changes and this
-               becomes reachable
-    blocked    what a refusal actually is here — PerimeterX's denial page, or
-               Cloudflare's managed challenge when the client did not look
-               like a browser at all
+    challenge  a refusal carrying something this repo can solve, which on
+               this site is PerimeterX's denial page when it renders its
+               reCAPTCHA Enterprise widget. Measured: solved in ~55s for
+               $0.00299, after which the page came back with its grid, while
+               a plain reload cleared the same block 0 of 8 times
+    blocked    a refusal with nothing solvable on it — PerimeterX's
+               widget-less stub, or Cloudflare's managed challenge (2captcha
+               solves Turnstile; this repo does not implement the task, and a
+               browser engine never meets it anyway)
 
 The policy lives in `STATE_POLICY` as DATA, so an engine cannot quietly
 disagree with its twins about whether a page is worth retrying or worth
@@ -386,13 +384,18 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     if not has_pool:
         hints.append("spread the load with --proxy-file, and prefer an exit "
                      "in the site's own country")
-    if unsolvable_challenge(html or ""):
-        # Said OUT LOUD, because the obvious next move on seeing a captcha is
-        # to buy a solver, and here that would be money for nothing.
+    if detect_bot_challenge(html or ""):
         hints.append(
-            f"this page rendered {unsolvable_challenge(html or '')}, which "
-            f"this project does not implement — a 2Captcha key will NOT get "
-            f"you past it and none was charged")
+            "this page rendered a solvable widget — `--solve-captcha always` "
+            "with a funded key gets through it (measured: ~55s, $0.003), "
+            "though a fresh session usually clears the same refusal for "
+            "nothing")
+    elif unsolvable_challenge(html or ""):
+        # Said OUT LOUD, because the obvious next move on seeing a captcha is
+        # to buy a solver, and on THIS variant there is nothing to buy.
+        hints.append(
+            f"this page carries {unsolvable_challenge(html or '')} — a solve "
+            f"was not attempted and nothing was charged")
     lead = "blocked (PerimeterX)" if marker else "blocked (no vendor marker)"
     return lead + ". " + "; ".join(hints) + "."
 

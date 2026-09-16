@@ -154,6 +154,18 @@ found only by running the SECONDARY engines rather than just the primary one
   one — because telling a reader to wait for another run when the profile has
   expired is a wasted afternoon.
 
+* **Two captcha bugs found by spending real money on the first attempt.**
+  The variant heuristic had no rung for "challenge frame present, no `size`,
+  no `render`", so it fell through to v3, bought a
+  `RecaptchaV3TaskProxyless` and got `ERROR_CAPTCHA_UNSOLVABLE` after 87
+  seconds — the exact "wrong variant buys a rejected token" failure
+  `captcha_solver.py`'s own docstring warns about. v3 renders no challenge
+  frame at all, so a frame present now settles the variant as a v2 checkbox.
+  Separately, the STATIC detector could not see this widget either: it bails
+  unless the markup contains `grecaptcha`, and foodpanda's denial page
+  carries only the hyphenated class `g-recaptcha` — so anyone debugging from
+  a `--dump-html` capture was told there was no captcha at all.
+
 ### Known limitations, stated rather than worked around
 
 * **No vendor-page mode.** A `/restaurant/{code}/{slug}` page is where a
@@ -163,11 +175,17 @@ found only by running the SECONDARY engines rather than just the primary one
   sites. A parser written against markup nobody has seen is a guess with a
   docstring, so the mode is absent rather than broken. Such a URL is refused
   with that reason.
-* **The captcha solver is inapplicable on this site**, which is not the
-  same as untested: the only challenge foodpanda renders is reCAPTCHA
-  Enterprise, which this project does not implement, so no solve is ever
-  attempted and no key is ever charged. The other three paid paths WERE run
-  end to end on 2026-09-15 — see "Verified live" below.
+* **reCAPTCHA Enterprise is now implemented and solved.** An earlier draft of
+  this repo reported foodpanda's challenge as unsolvable and told readers a
+  2Captcha key would not help — which confused a limit of THIS CODE with a
+  limit of the product. 2Captcha solves enterprise reCAPTCHA
+  (`RecaptchaV2EnterpriseTaskProxyless`) and Cloudflare Turnstile;
+  `captcha_solver.py` was simply building the non-enterprise task types. It
+  now carries the page's own answer — the enterprise loader, and
+  `window.grecaptcha.enterprise` — into the task, and a live PerimeterX
+  denial was solved end to end: ~55 seconds, $0.00299, and the page came back
+  with its full grid. Control: a plain same-session reload cleared the same
+  block **0 of 8 times**, so the token is what got in.
 * **foodpanda.co.th is NOT a foodpanda site and is refused with that
   reason.** Measured 2026-09-15 through the Scraping Browser: it answers
   HTTP 200 and redirects to **robinhood.co.th**, a different company, with

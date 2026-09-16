@@ -40,38 +40,50 @@ So, in order:
 
 ---
 
-## "Why doesn't my 2Captcha key get me past the block?"
+## Can a 2Captcha key get me past the block?
 
-Because the challenge is **reCAPTCHA Enterprise**, and this project
-implements reCAPTCHA v2 and v3.
+**Yes**, measured — and it is usually not the cheapest way.
 
-PerimeterX's denial page renders what looks like an ordinary v2 checkbox:
+PerimeterX's denial page renders a reCAPTCHA **Enterprise** widget. Solved
+through this repo's own path on 2026-09-16 against a live refusal:
+`RecaptchaV2EnterpriseTaskProxyless`, ~55 seconds, **$0.00299**, and the page
+came back HTTP 200 with 48 vendor tiles. The control: reloading the same
+denial page without solving cleared it **0 of 8 times**, so the token is what
+got in.
 
-```html
-<div id="px-captcha">
-  <div class="g-recaptcha" data-sitekey="6Lc…" data-callback="handleCaptcha">
+```bash
+python3 playwright_scraper.py --solve-captcha always --url "..."
 ```
 
-and reading only that, this repo first classified a refusal as a solvable
-challenge. The **loader** beside it says otherwise, and the loader wins:
+**But try the free thing first.** The refusal is per-session: a fresh browser
+and a pause clear it for nothing, which is why `--solve-captcha when-blocked`
+is the default and the retry budget runs before any money is spent. Use
+`always` when retries are not getting through and you want the page now.
 
-```html
-<script src="https://www.google.com/recaptcha/enterprise.js?hl=en-US">
+### If your solve is rejected, check the task type
+
+An enterprise widget solved through the ORDINARY task type returns a token
+the site rejects. This repo's first live attempt did that — it read the
+bframe with no `size` as v3, bought a `RecaptchaV3TaskProxyless`, and got
+`ERROR_CAPTCHA_UNSOLVABLE` after 87 seconds and $0.003. The fix was the
+variant heuristic: v3 never renders a challenge frame, so a frame present
+means a v2 checkbox.
+
+The log tells you which task was bought:
+
+```
+createTask: RecaptchaV2EnterpriseTaskProxyless (sitekey=6Lc...)
 ```
 
-Measured on four denial documents — foodpanda.pk and foodpanda.sg, a vendor
-page and a listing page, captures hours apart: 3, 3, 3 and 2 occurrences of
-`recaptcha/enterprise`, and **zero** occurrences of `recaptcha/api.js` on any
-of them. The runtime detector agrees independently: `___grecaptcha_cfg`
-reports `enterprise: true`.
+### What genuinely cannot be solved
 
-So `product_parser.detect_bot_challenge` returns `None` for these pages, the
-state is `blocked` rather than `challenge`, **no solve is attempted and your
-key is not charged**. That is deliberate: a solve here would buy a token the
-site rejects.
+| | |
+|---|---|
+| **PerimeterX's stub** — a 4.7 KB denial with 24 `px-captcha` references and no widget at all | nothing there for any solver, at any price |
+| **Cloudflare Turnstile** | 2Captcha solves it (`TurnstileTaskProxyless`); this repo does not implement the task, which needs `cData`/`chlPageData` intercepted before the widget loads. A browser engine never meets it anyway |
 
-The day foodpanda swaps the enterprise loader for the ordinary one, one line
-in `product_parser.py` changes — see `WOULD_BE_SOLVABLE_MARKERS`.
+Both are reported as `blocked` with the reason named, so nothing is attempted
+or billed for a task this code cannot build.
 
 ---
 

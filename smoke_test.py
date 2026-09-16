@@ -570,8 +570,13 @@ def test_page_state():
                     detect_block_marker(html_of(name)) is None)
 
     for name in BLOCK_FIXTURES:
-        ok &= check(f"{name} is blocked",
-                    detect_page_state(html_of(name), 403, url_of(name)) == "blocked")
+        # A refusal is `blocked` UNLESS it hands us something solvable — the
+        # two PerimeterX pages that render an enterprise widget are
+        # `challenge`, which is what makes a solve worth paying for. The
+        # distinction is the point, so it is asserted rather than glossed.
+        want = ("challenge" if "RECAPTCHA" in name else "blocked")
+        ok &= check(f"{name} is {want}",
+                    detect_page_state(html_of(name), 403, url_of(name)) == want)
         ok &= check(f"{name} is NOT served by foodpanda",
                     not served_by_foodpanda(html_of(name)))
         ok &= check(f"{name} names its vendor",
@@ -621,9 +626,20 @@ def test_markers_that_match_every_page():
                     on_good == len(LISTING_FIXTURES))
         ok &= check(f"...and is NOT used as a block marker",
                     not any(probe.lower() == m.lower() for m in BLOCK_MARKERS))
-        ok &= check(f"...and is NOT used as a challenge marker",
-                    not any(probe.lower() in m.lower()
-                            for m in BOT_CHALLENGE_MARKERS))
+        # The bare word must not be a marker ON ITS OWN. `recaptcha/enterprise`
+        # contains it and is fine — what matters is that no marker matches a
+        # page the site served, which is asserted directly below.
+        ok &= check(f"...and is not a marker on its own",
+                    probe.lower() not in
+                    [m.lower() for m in BOT_CHALLENGE_MARKERS])
+
+    # Every CHALLENGE marker must score zero on every served page too — this
+    # is the invariant the substring test above used to stand in for, and it
+    # is the one that actually matters.
+    for marker in BOT_CHALLENGE_MARKERS:
+        hits = sum(1 for n in LISTING_FIXTURES if marker in html_of(n))
+        ok &= check(f"challenge marker {marker!r} is absent from every "
+                    f"served page", hits == 0)
 
     # Every marker this repo DOES use must score zero on every served page.
     for marker in BLOCK_MARKERS + CLOUDFLARE_MARKERS:
@@ -638,12 +654,14 @@ def test_markers_that_match_every_page():
 
 
 # ---------------------------------------------------------------------------
-def test_the_challenge_is_not_solvable():
-    group("The challenge is reCAPTCHA Enterprise, and unsolvable here")
+def test_the_challenge_is_enterprise_and_solvable():
+    group("The challenge is reCAPTCHA Enterprise — and that IS solvable")
     ok = True
-    # The bug this pins: the denial page's container looks like a v2 checkbox
-    # and the LOADER is enterprise.js. Reading the container alone called it a
-    # solvable `challenge` and would have paid for a token the site rejects.
+    # The correction this group exists to hold. An earlier version of this
+    # repo reported the enterprise widget as unsolvable and told readers a
+    # 2captcha key would not help — which confused a limit of THIS CODE with
+    # a limit of the product. 2captcha solves enterprise reCAPTCHA; the code
+    # simply was not building the task.
     for name in ("BLOCK_PX_RECAPTCHA", "BLOCK_PX_RECAPTCHA_SG"):
         html = html_of(name)
         ok &= check(f"{name} carries the v2-shaped container",
@@ -652,25 +670,78 @@ def test_the_challenge_is_not_solvable():
                     "recaptcha/enterprise" in html)
         ok &= check(f"{name} does NOT load the ordinary api.js",
                     "recaptcha/api.js" not in html)
-        ok &= check(f"{name} is reported as UNSOLVABLE",
-                    detect_bot_challenge(html) is None)
-        ok &= check(f"{name} names what it is",
-                    unsolvable_challenge(html) == "reCAPTCHA Enterprise")
-        ok &= check(f"{name} is therefore 'blocked', so nothing is billed",
-                    detect_page_state(html, 403, url_of(name)) == "blocked")
+        ok &= check(f"{name} is reported as SOLVABLE",
+                    detect_bot_challenge(html) == "recaptcha_enterprise")
+        ok &= check(f"{name} is therefore a 'challenge', not 'blocked'",
+                    detect_page_state(html, 403, url_of(name)) == "challenge")
+        ok &= check(f"{name} has nothing listed as unsolvable",
+                    unsolvable_challenge(html) is None)
 
-    ok &= check("the solvable-marker set is empty, and that is the measurement",
-                BOT_CHALLENGE_MARKERS == ())
-    ok &= check("enterprise leads the unsolvable set",
-                UNSOLVABLE_CHALLENGE_MARKERS[0] == "recaptcha/enterprise")
-    # The set that documents what WOULD be solvable is deliberately not
-    # consulted — a marker set that is checked but can never match is dead
-    # code wearing a policy's clothes (§17).
-    ok &= check("WOULD_BE_SOLVABLE_MARKERS names the ordinary loaders",
-                "recaptcha/api.js" in WOULD_BE_SOLVABLE_MARKERS)
-    ok &= check("...and is not wired into detect_bot_challenge",
-                "WOULD_BE_SOLVABLE_MARKERS" not in inspect.getsource(
-                    detect_bot_challenge))
+    # The static detector must see it, because that is the half that works on
+    # a `--dump-html` capture. It used to return None here: the page carries
+    # the hyphenated CLASS `g-recaptcha` and no `grecaptcha` identifier, and
+    # the detector bailed on the latter.
+    import captcha_solver
+    for name in ("BLOCK_PX_RECAPTCHA", "BLOCK_PX_RECAPTCHA_SG"):
+        challenge = captcha_solver.detect_recaptcha_v3(html_of(name),
+                                                       url_of(name))
+        ok &= check(f"{name}: the static detector finds the widget",
+                    challenge is not None)
+        if challenge:
+            ok &= check(f"{name}: ...and marks it enterprise",
+                        challenge.enterprise is True)
+            ok &= check(f"{name}: ...as a v2 checkbox",
+                        challenge.kind == "recaptcha_v2")
+            task = captcha_solver._v2_task_for(challenge, 0.7)
+            # THE thing that makes the solve worth paying for. An enterprise
+            # widget solved through the ordinary task type returns a token
+            # the site rejects.
+            ok &= check(f"{name}: the task type is the ENTERPRISE one",
+                        task["type"] == "RecaptchaV2EnterpriseTaskProxyless")
+            ok &= check(f"{name}: the task carries the sitekey and page",
+                        task["websiteKey"] == challenge.sitekey
+                        and task["websiteURL"] == url_of(name))
+
+    # An ordinary widget must still get the ordinary task type.
+    ordinary = captcha_solver.CaptchaChallenge(
+        kind="recaptcha_v2", sitekey="6Lc" + "x" * 20,
+        page_url="https://example.com/", enterprise=False)
+    ok &= check("a non-enterprise widget keeps the ordinary task type",
+                captcha_solver._v2_task_for(ordinary, 0.7)["type"]
+                == "RecaptchaV2TaskProxyless")
+    enterprise_v3 = captcha_solver.CaptchaChallenge(
+        kind="recaptcha_v3", sitekey="6Lc" + "y" * 20,
+        page_url="https://example.com/", enterprise=True)
+    ok &= check("an enterprise v3 sets isEnterprise",
+                captcha_solver._v2_task_for(enterprise_v3, 0.7)
+                .get("isEnterprise") is True)
+
+    # WHAT IS GENUINELY UNSOLVABLE, and why it is a different thing.
+    stub = html_of("BLOCK_PX_PLAIN")
+    ok &= check("PerimeterX's stub carries NO widget at all",
+                'class="g-recaptcha"' not in stub
+                and "recaptcha/enterprise" not in stub)
+    ok &= check("...so it is blocked, not a challenge",
+                detect_page_state(stub, 403, url_of("BLOCK_PX_PLAIN"))
+                == "blocked")
+    ok &= check("...and nothing is attempted for it",
+                detect_bot_challenge(stub) is None)
+    ok &= check("...with the reason named rather than shrugged at",
+                "no widget" in (unsolvable_challenge(stub) or ""))
+
+    # Cloudflare: 2captcha CAN solve Turnstile; this repo does not implement
+    # the task, and a browser engine never meets the challenge anyway. The
+    # wording has to keep those apart.
+    cf = html_of("BLOCK_CLOUDFLARE")
+    ok &= check("Cloudflare is blocked, not attempted",
+                detect_bot_challenge(cf) is None
+                and detect_page_state(cf, 403, url_of("BLOCK_CLOUDFLARE"))
+                == "blocked")
+    reason = unsolvable_challenge(cf) or ""
+    ok &= check("...named as Turnstile", "Turnstile" in reason)
+    ok &= check("...and NOT described as impossible",
+                "2captcha solves it" in reason)
+
     ok &= check("a served page is never reported as a challenge",
                 all(detect_bot_challenge(html_of(n)) is None
                     for n in LISTING_FIXTURES))
@@ -1588,15 +1659,21 @@ def test_readme_claims():
                 "/restaurant/" in text and "403" in text)
     ok &= check("it states the challenge is reCAPTCHA Enterprise",
                 "Enterprise" in text)
-    # The claim that matters about the solver is no longer "untested" — the
-    # other three paid paths were run end to end — but that it is
-    # INAPPLICABLE here, and that nobody is charged for it. A README that
-    # quietly dropped this would be selling a key that cannot help.
-    ok &= check("it says the solver is not charged on this site",
-                re.search(r"never charged|not charged|is never charged",
-                          text, re.I) is not None)
-    ok &= check("...and names what it cannot solve",
-                "Enterprise" in text)
+    # The claim that matters about the solver, and it has been wrong in both
+    # directions in this repo's history. It is not "inapplicable" — 2captcha
+    # solves reCAPTCHA Enterprise and a live solve got through for $0.00299 —
+    # and it is not a free lunch either, because a fresh session clears the
+    # same refusal for nothing. The README has to carry the measurement AND
+    # the cheaper alternative, or it is selling something.
+    ok &= check("the README states the measured solve cost",
+                "0.00299" in text)
+    ok &= check("...names the enterprise task type",
+                "RecaptchaV2EnterpriseTaskProxyless" in text)
+    ok &= check("...and still points at the free path first",
+                re.search(r"when-blocked.*default|default.*when-blocked",
+                          text, re.S) is not None)
+    ok &= check("...naming what genuinely cannot be solved",
+                "stub" in text and "Turnstile" in text)
     # Compared with thousands separators stripped: the README writes "1,904"
     # because that is the readable form, and a check that forced "1904" would
     # be a check about typography rather than about the claim.
@@ -1763,7 +1840,7 @@ def main() -> int:
     ok &= test_pagination()
     ok &= test_page_state()
     ok &= test_markers_that_match_every_page()
-    ok &= test_the_challenge_is_not_solvable()
+    ok &= test_the_challenge_is_enterprise_and_solvable()
     ok &= test_page_flow_policy()
     ok &= test_scroll_loop()
     ok &= test_a_refused_page_is_not_an_empty_one()

@@ -124,8 +124,10 @@ two, that is the difference the money buys.
 > is not a problem here — but if you wire one up yourself, use a proxy for
 > the schedule and keep the endpoint for runs you are watching.
 
-**What a 2Captcha key does NOT buy here**: a way past the block. See
-[the challenge is Enterprise](#the-challenge-is-recaptcha-enterprise-and-this-repo-cannot-solve-it).
+**What a 2Captcha key buys here**: a way past the block, measured. The
+refusal renders reCAPTCHA Enterprise, `--solve-captcha` clears it, and the
+page comes back with its full grid — see
+[solving the block](#solving-the-block-works-and-costs-about-a-third-of-a-cent).
 
 ---
 
@@ -270,37 +272,65 @@ served normally seconds later.
 If you see this from a browser engine, something has stripped the context —
 that is not a proxy problem and a proxy will not fix it.
 
-### The challenge is reCAPTCHA **Enterprise**, and this repo cannot solve it
+### Solving the block works, and costs about a third of a cent
 
-PerimeterX's denial page renders what looks like an ordinary reCAPTCHA v2
-checkbox:
+PerimeterX's denial page renders a reCAPTCHA **Enterprise** widget, and that
+is solvable. Measured 2026-09-16 against a live refusal on foodpanda.sg,
+through this repo's own solve path:
+
+| | |
+|---|---|
+| variant | `recaptcha_v2` — enterprise loader, bframe, no `size`, no `render` |
+| task type | `RecaptchaV2EnterpriseTaskProxyless` |
+| solved in | ~55 seconds |
+| after the token was injected | HTTP 200, 1,172,561 bytes, **48 vendor tiles** |
+| cost | **$0.00299** |
+
+And the control that makes that a claim rather than a coincidence: reloading
+a denial page in the same session **without** solving cleared the block
+**0 of 8 times**. The token is what got in.
+
+```bash
+python3 playwright_scraper.py --solve-captcha always \
+  --url "https://www.foodpanda.sg/city/singapore"   # key comes from .env
+```
+
+**The task type is the whole game.** The widget's container looks like an
+ordinary v2 checkbox:
 
 ```html
 <div id="px-captcha">
   <div class="g-recaptcha" data-sitekey="6Lc…" data-callback="handleCaptcha">
 ```
 
-and on that evidence this repo first classified a refusal as a **solvable**
-challenge. The loader beside it says otherwise, and the loader wins:
+but the loader beside it is the enterprise API —
+`https://www.google.com/recaptcha/enterprise.js` — measured on four denial
+documents across two country sites, with zero occurrences of
+`recaptcha/api.js` on any of them. An enterprise widget solved through the
+ordinary task type returns a token the site rejects. This repo's first live
+attempt did exactly that, from a different mistake: it read the bframe with
+no `size` as v3, bought a `RecaptchaV3TaskProxyless`, and got
+`ERROR_CAPTCHA_UNSOLVABLE` after 87 seconds and $0.003. v3 never renders a
+challenge frame, so a frame present now settles the variant as a v2 checkbox.
 
-```html
-<script src="https://www.google.com/recaptcha/enterprise.js?hl=en-US">
-```
+**What is NOT solvable**, and the difference matters:
 
-Measured on four denial documents — two country sites, two page kinds,
-captures hours apart: **3, 3, 3 and 2** occurrences of `recaptcha/enterprise`,
-and **zero** occurrences of `recaptcha/api.js` on any of them. The runtime
-detector agrees independently: `___grecaptcha_cfg` reports `enterprise: true`.
+* **PerimeterX's stub.** A second denial variant, 4.7 KB, carries 24
+  `px-captcha` references and **no widget at all**. There is nothing there
+  for any solver to work on, at any price. Reported as `blocked`, and nothing
+  is attempted or billed.
+* **Cloudflare's managed challenge.** 2Captcha does solve Turnstile
+  (`TurnstileTaskProxyless`), but this repo does not implement the task — it
+  needs `cData` and `chlPageData` intercepted from the page before the widget
+  loads. It also never comes up in practice: Cloudflare's challenge is what a
+  **non-browser** client gets, and every engine here drives a real browser.
+  Reported as `blocked`, with that reason named.
 
-`captcha_solver.py` implements reCAPTCHA v2 and v3 and **not** the enterprise
-method. So such a page is reported as `blocked` rather than `challenge`,
-**no solve is attempted and your key is not charged** — a solve would have
-bought a token the site rejects.
-
-The day foodpanda swaps the enterprise loader for the ordinary one, one line
-in `product_parser.py` changes.
-
----
+**Is a solve the right move?** Usually not, on cost alone: the refusal is
+per-session and a fresh browser clears it for nothing — which is why
+`--solve-captcha when-blocked` is the default and the retry budget runs
+first. Reach for `always` when retries are not clearing it and you want the
+page now.
 
 ## Pagination
 
@@ -436,12 +466,10 @@ key.
 `FOODPANDA_URL` are the four variables the code reads, and a test asserts
 `.env.example` documents exactly those, in both directions.
 
-> **Three of the four 2Captcha paths were run end to end against this site
-> on 2026-09-15.** The fourth — the captcha solver — is not untested but
-> INAPPLICABLE: the only challenge foodpanda renders is reCAPTCHA Enterprise,
-> which this project does not implement, so there is nothing here to spend a
-> solve on and your key is never charged for one. See
-> [the challenge is Enterprise](#the-challenge-is-recaptcha-enterprise-and-this-repo-cannot-solve-it).
+> **All four 2Captcha paths were run end to end against this site.** The
+> solver included: a live PerimeterX denial was solved and the page came back
+> with its grid, for about a third of a cent. See
+> [solving the block](#solving-the-block-works-and-costs-about-a-third-of-a-cent).
 
 ---
 
@@ -502,3 +530,4 @@ MIT. See [LICENSE](LICENSE).
 
 Captcha solving, the Scraping Browser API, proxies and fingerprints are four
 separately billed [2Captcha](https://2captcha.com) products behind one key.
+All four were run end to end against this site.
