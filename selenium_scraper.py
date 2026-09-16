@@ -454,12 +454,14 @@ def handle_captcha_if_present(session, args) -> bool:
     blocking" rule as the Playwright engine — the three must agree about
     when a run spends money.
 
-    ON THIS SITE THIS PATH IS LOAD-BEARING: foodpanda's refusal is
-    PerimeterX's denial document, and that document renders a reCAPTCHA v2
-    checkbox with a real site key. What it cannot help with is Cloudflare's
-    managed challenge — what a non-browser client gets — which is reported as
-    blocked so nothing is attempted or billed. See
-    product_parser.detect_page_state.
+    ON THIS SITE THIS PATH IS LOAD-BEARING, and both challenges go through
+    it: PerimeterX's denial document renders a reCAPTCHA ENTERPRISE widget
+    (task type RecaptchaV2EnterpriseTaskProxyless — the ordinary one buys a
+    token the site rejects), and Cloudflare's managed challenge is a
+    Turnstile whose parameters this engine intercepts from turnstile.render
+    before the page's own script runs. What nothing can help with is
+    PerimeterX's widget-less denial variant, which is reported as blocked so
+    nothing is attempted or billed. See product_parser.detect_page_state.
     """
     driver = session.driver
     d = _driver(session)
@@ -1080,7 +1082,7 @@ def parse_args():
     p.add_argument("--url", default=None,
                    help="foodpanda listing URL: a country home page, "
                         "/city/{city}, or /city/{city}/area/{area} (the one "
-                        "that paginates). Eleven country sites are supported; "
+                        "that paginates). Ten country sites are supported; "
                         "the country is the host. Required, unless "
                         "FOODPANDA_URL is set in the environment or in .env.")
     p.add_argument("--mode", choices=["listing"], default="listing",
@@ -1151,11 +1153,15 @@ def parse_args():
                    default="when-blocked",
                    help="when-blocked (default): only pay to solve a "
                         "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Note that "
-                        "NO challenge has ever been observed on this site — a "
-                        "refused request gets no page at all — so neither "
-                        "setting has anything to act on today, and neither "
-                        "helps with a refusal.")
+                        "always: solve whenever one is detected. Both "
+                        "of this site's challenges go through here: "
+                        "PerimeterX's denial renders a reCAPTCHA Enterprise "
+                        "widget (~55s, $0.00299 measured) and Cloudflare's "
+                        "managed challenge is a Turnstile (11s, $0.00145, "
+                        "Challenge page included). Only PerimeterX's "
+                        "widget-less denial variant has nothing to act on. "
+                        "when-blocked stays the default because the refusal "
+                        "is per-session and a fresh browser clears it free.")
     p.add_argument("--min-score", type=float, default=0.7)
     p.add_argument("--cdp-endpoint", default=None,
                    help="Attach to a running browser at host:port. Must NOT "

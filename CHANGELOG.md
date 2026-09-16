@@ -11,6 +11,61 @@ or from a half-empty output file.
 
 ---
 
+## [0.2.1] — 2026-09-16
+
+0.2.0 implemented both of this site's captchas and corrected the README. It
+did **not** correct `--help`, which is the surface a user reads first — so the
+withdrawn claim went on shipping in the engines' own text.
+
+> **`--help` was lying in three places.** Two engines said "NO challenge has
+> ever been observed on this site … neither setting has anything to act on
+> today, and neither helps with a refusal". Playwright's said Cloudflare's
+> challenge "is reported as blocked instead, so no solve is attempted or
+> billed for it". All three describe a repo that existed before 0.2.0.
+
+### Fixed
+
+* **Every user-facing claim that a captcha cannot be solved is gone**, from
+  `--help`, from four docstrings and from `page_flow.block_advice`. What
+  replaced them is what was measured: reCAPTCHA Enterprise ~55s / $0.00299,
+  Turnstile 11s / $0.00145, and PerimeterX's widget-less stub as the one
+  refusal nothing can buy.
+
+* **`--help` named a host the parser refuses.** `.co.th` was dropped in 0.1.0
+  — it redirects to robinhood.co.th, a different company — and
+  `product_parser.HOSTS` has held ten entries ever since, while three engines
+  and `output_writer.py` went on saying "eleven country sites" and
+  playwright's `--url` help still listed `.co.th` among the supported ones.
+
+* **Two documents disagreed about Cloudflare.** The README said a managed
+  challenge is what a non-browser client gets and that a browser engine
+  seeing one means "something has stripped the context" — three sections
+  above the Turnstile section explaining that `foodpanda.com` serves one to a
+  real browser, which is how this repo solved one. Same contradiction in
+  TROUBLESHOOTING.md. Both now say the true thing: every non-browser client
+  gets it, a browser can meet one too, and either way it is solved.
+
+### Added
+
+* **A flag reference in the README.** There was none: sixteen real flags were
+  documented nowhere but `--help`. Four tables — core, proxies, 2Captcha, and
+  the engine differences — with the default and what each one actually does.
+
+* **Three checks, because prose does not fail a build on its own.** A
+  banned-phrase check over every shipped `.py` and `.md` (CHANGELOG exempt —
+  it quotes the withdrawn claim in order to withdraw it, and a released
+  section is history); a check that the documented host count agrees with
+  `len(HOSTS)` and that no user-facing text advertises a refused host; and a
+  check that every flag an engine accepts appears in the README, that every
+  in-page link resolves, and that each exit code is documented.
+
+  Each was verified to FAIL when the fix is reverted. A check that cannot
+  fail is not a check.
+
+**532 offline checks**, up from 493.
+
+---
+
 ## [0.2.0] — 2026-09-16
 
 Everything here is about the same thing: **what this scraper does when
@@ -269,5 +324,6 @@ found only by running the SECONDARY engines rather than just the primary one
   of foodpanda's assets — and reported exit 3, sending the reader after a
   proxy problem that does not exist (§5's `mediamarkt.lu` case).
 
+[0.2.1]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.1
 [0.2.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.0
 [0.1.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.1.0

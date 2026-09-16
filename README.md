@@ -124,10 +124,15 @@ two, that is the difference the money buys.
 > is not a problem here — but if you wire one up yourself, use a proxy for
 > the schedule and keep the endpoint for runs you are watching.
 
-**What a 2Captcha key buys here**: a way past the block, measured. The
-refusal renders reCAPTCHA Enterprise, `--solve-captcha` clears it, and the
-page comes back with its full grid — see
-[solving the block](#solving-the-block-works-and-costs-about-a-third-of-a-cent).
+**What a 2Captcha key buys here**: a way past both of this site's
+refusals, measured. PerimeterX's denial renders reCAPTCHA **Enterprise**
+(~55s, $0.00299) and Cloudflare's "Just a moment…" is a **Turnstile** (11s,
+$0.00145); `--solve-captcha` clears either, and the page comes back with its
+full grid — see
+[solving the block](#solving-the-block-works-and-costs-about-a-third-of-a-cent)
+and [Turnstile](#cloudflare-turnstile-is-implemented-too-challenge-page-included).
+The one thing no key can do is PerimeterX's widget-less stub: there is
+nothing on that page to solve.
 
 ---
 
@@ -263,14 +268,20 @@ no widget at all.
 
 ### Cloudflare — `Just a moment...`
 
-What a client that does not look like a browser gets, **before it ever
-reaches the application**. Measured with `curl` against all eleven hosts
-this repo probed (the ten storefronts and foodpanda.com): every one returned
-HTTP 403 and this document, while a real browser on the same address was
-served normally seconds later.
+Cloudflare's managed challenge, served **before the request ever reaches
+the application** — so it is a different thing from PerimeterX's denial, and
+it wants a different answer.
 
-If you see this from a browser engine, something has stripped the context —
-that is not a proxy problem and a proxy will not fix it.
+Every non-browser client gets it: measured with `curl` against all eleven
+hosts this repo probed (the ten storefronts and foodpanda.com), every one
+returned HTTP 403 and this document, while a real browser on the same address
+was served normally seconds later.
+
+**A real browser can get it too**, and `foodpanda.com` in particular does.
+That is not "something stripped the context" and a proxy will not fix it
+either — it is a Turnstile, and this repo
+[solves it](#cloudflare-turnstile-is-implemented-too-challenge-page-included)
+for $0.00145.
 
 ### Solving the block works, and costs about a third of a cent
 
@@ -436,6 +447,56 @@ and its own README points at Playwright.
 
 Install exactly **one** engine: playwright and pyppeteer pin incompatible
 `pyee` versions, and pyppeteer and selenium collide on `urllib3`.
+
+---
+
+## Flags
+
+Identical across the three engines, except where the engine's own limits make
+a flag impossible — `--chromium-path` is pyppeteer's, and Selenium cannot
+authenticate a proxy or a CDP endpoint at all (see [Engines](#engines)).
+Every one of these is also settable from `.env`; see
+[Configuration](#configuration).
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--url URL` | — | The listing to read. Required, unless `FOODPANDA_URL` is set. The country is the **host**, so there is no `--country` to disagree with it |
+| `--mode {listing}` | `listing` | The only mode. [There is deliberately no vendor mode](#what-a-vendor-page-does) |
+| `--category LABEL` | — | A label for this **run**, recorded as `run_label` in the sidecar. It does *not* write the `category` column, which holds the vendor's own cuisines |
+| `--pages N` | `1` | Listing pages to crawl. The home page has no pagination, so `--pages` there scrolls further instead |
+| `--delay S` | `1.0` | Delay between pages |
+| `--concurrency N` | `1` | Parallel workers, each with its own browser and its own proxy exit. Ignored with `--cdp-endpoint` |
+| `--retries N` | `3` | Attempts per page, each with a **fresh browser** — the instrument that actually clears a refusal here. Backs off by doubling. An `empty` page is not retried |
+| `--retry-delay S` | `2.0` | Seconds before the first retry, doubling after |
+| `--format {json,csv,both}` | `json` | Output format |
+| `--out PREFIX` | `foodpanda_products` | Output prefix; the sidecar is `<prefix>.meta.json` |
+| `--locale L` | `en-US` | What the browser claims about itself. It does **not** pick the page's language — the host does |
+| `--allow-empty` | off | Write files even with 0 rows. Off so a failed run cannot overwrite good data |
+| `--dump-html PATH` | — | Save the exact HTML the parser was given, **on success as well as failure** |
+| `--headful` / `--headless` | **`--headful`** | [Headless is refused on this site](#headless-is-refused--so---headful-is-the-default); `--headless` is for containers |
+
+**Proxies** — [what they buy here](#do-i-need-to-buy-anything):
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--proxy URL` | — | One exit, `http://user:pass@host:port` |
+| `--proxy-file PATH` | — | One URL per line to rotate across. Wins over `--proxy` |
+| `--proxy-rotate {per-run,per-page}` | `per-run` | `per-page` relaunches the browser with each exit, so the session does not follow the address |
+| `--proxy-shuffle` | off | Shuffle the pool at startup, so concurrent runs do not all start on the first exit |
+| `--proxy-block-retries N` | `2` | On a refusal, retry from this many **other** exits. Needs a pool |
+
+**2Captcha** — one key, four separately-billed products:
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--twocaptcha-key K` | — | Prefer `TWOCAPTCHA_KEY` in `.env`; a key on a command line is readable by `ps` |
+| `--solve-captcha {when-blocked,always}` | `when-blocked` | Both of this site's challenges go through here — reCAPTCHA Enterprise (~$0.00299) and Turnstile ($0.00145). `when-blocked` is the default because a fresh browser often clears the refusal for free |
+| `--captcha-api {v2,v1}` | `v2` | The current JSON API, or the legacy `in.php`/`res.php` pair. v1 cannot do Turnstile and says so |
+| `--min-score S` | `0.7` | reCAPTCHA **v3** score to request — `0.3`, `0.7` or `0.9` are the only values the API takes. Ignored for v2 widgets |
+| `--fingerprint` | off | [Makes this site worse — do not use it here](#--fingerprint-makes-this-site-worse--do-not-use-it-here) |
+| `--fp-tags TAG` | `Windows` | **One** OS-family tag. `Chrome`, `Desktop` and `Mobile` are each rejected by the API with HTTP 400 |
+| `--fp-country CC` | — | Match it to your exit's country; a US fingerprint on a German address is a contradiction |
+| `--cdp-endpoint WS` | — | Drive a remote browser (the Scraping Browser API) instead of a local one. `--proxy` and `--headless/--headful` are ignored with it, and [the endpoint expires in about a day](#do-i-need-to-buy-anything) |
 
 ---
 

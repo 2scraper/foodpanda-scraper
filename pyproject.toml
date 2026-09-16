@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foodpanda-scraper"
-version = "0.2.0"
+version = "0.2.1"
 description = "foodpanda vendor-listing scraper: restaurants and shops with ratings, cuisines, deals and opening state, across ten country sites."
 readme = "README.md"
 license = "MIT"

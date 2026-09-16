@@ -23,13 +23,17 @@ in output_writer.finish_run() and page_flow.py so they cannot drift apart.
 
 What is different about foodpanda
 ---------------------------------
-* **Two different refusals, and they want opposite responses.** A client that
-  does not look like a browser never reaches the application: Cloudflare
+* **Two different refusals, and they want different responses.** A client
+  that does not look like a browser never reaches the application: Cloudflare
   answers with a managed challenge, measured on all ten country sites with
-  plain HTTP. A client that DOES look like a browser meets PerimeterX, which
-  either serves the page or returns a 403 denial document — and that document
-  renders a real reCAPTCHA v2 checkbox, so unlike most refusals in this
-  family it is one a 2Captcha key can actually clear.
+  plain HTTP — and foodpanda.com serves one to a real browser too. A client
+  that DOES look like a browser meets PerimeterX, which either serves the
+  page or returns a 403 denial document. Unlike most refusals in this family,
+  BOTH are ones a 2Captcha key clears: the denial renders a reCAPTCHA
+  Enterprise widget (~55s, $0.00299) and the Cloudflare challenge is a
+  Turnstile (11s, $0.00145, its parameters intercepted from
+  `turnstile.render`). PerimeterX's second, widget-less denial variant is the
+  only one nothing can buy.
 
 * **The refusal is per-session, not per-address, and it clears by itself.**
   Measured over a sweep of fourteen addresses from one residential exit: 10
@@ -678,21 +682,29 @@ def handle_captcha_if_present(page, args) -> bool:
     against each other rather than short-circuited, because they can disagree
     about the variant and the parameters for one are rejected for the other.
 
-    ON THIS SITE THIS PATH BUYS NOTHING TODAY, and that is measured rather
-    than assumed. foodpanda's refusal is PerimeterX's denial document, and it
-    renders a v2-shaped `g-recaptcha` container whose LOADER is
-    `https://www.google.com/recaptcha/enterprise.js` — measured on four
-    denial documents across two country sites, with zero occurrences of
-    `recaptcha/api.js` on any of them. captcha_solver.py implements v2 and v3
-    and not the enterprise method, so `detect_page_state` reports such a page
-    as "blocked" rather than "challenge", no solve is attempted, and nothing
-    is charged for a token the site would reject (§8: detected != blocking
-    != paying).
+    ON THIS SITE THIS PATH IS LOAD-BEARING, and both of the site's
+    challenges go through it.
 
-    The path is kept wired up because a bot manager's choice of widget is a
-    configuration rather than a fact, and because the family's rule is that
-    detection stays broad. What actually clears a refusal here is a fresh
-    session and a slower request rate.
+    PerimeterX's denial document renders a v2-shaped `g-recaptcha` container
+    whose LOADER is `https://www.google.com/recaptcha/enterprise.js` —
+    measured on four denial documents across two country sites, with zero
+    occurrences of `recaptcha/api.js` on any of them. So the task type is
+    `RecaptchaV2EnterpriseTaskProxyless`, not the ordinary one: an enterprise
+    widget solved through the plain method returns a token the site rejects.
+    Measured end to end: ~55 seconds, $0.00299, page came back with its full
+    grid, against a control of 0 of 8 same-session reloads.
+
+    Cloudflare's managed challenge goes through `TURNSTILE_INTERCEPT_JS` and
+    `TurnstileTaskProxyless` — 11 seconds, $0.00145. See
+    captcha_solver.detect_turnstile for why it has to be intercepted rather
+    than read.
+
+    The one refusal nothing can buy is PerimeterX's widget-less stub: 4.7 KB,
+    24 `px-captcha` references, no widget at all. That one is `blocked`, and
+    nothing is attempted or billed for it (§8: detected != blocking !=
+    paying). Solving is still not the CHEAPEST move here — the refusal is
+    per-session and a fresh browser clears it free — which is why
+    `when-blocked` is the default rather than `always`.
     """
     html = _content_when_settled(page)
     if html is None:
@@ -1635,8 +1647,8 @@ def parse_args():
                         "(https://www.foodpanda.pk/), a city listing "
                         "(/city/{city}) or an area listing "
                         "(/city/{city}/area/{area}), which is the one that "
-                        "paginates. Eleven country sites are supported — "
-                        "foodpanda.pk, .sg, .my, .co.th, .ph, .com.tw, .hk, "
+                        "paginates. Ten country sites are supported — "
+                        "foodpanda.pk, .sg, .my, .ph, .com.tw, .hk, "
                         ".com.bd, .com.kh, .la, .com.mm — and the country is "
                         "the host, so there is no --country flag to disagree "
                         "with it. Required, unless FOODPANDA_URL is set in "
@@ -1759,10 +1771,13 @@ def parse_args():
                         "family: the refusal here is PerimeterX's denial "
                         "page, and that page renders a real reCAPTCHA v2 "
                         "checkbox, so a solve is a genuine way through rather "
-                        "than a decoration. Cloudflare's managed challenge — "
-                        "what a non-browser client gets — is reported as "
-                        "blocked instead, so no solve is attempted or billed "
-                        "for it. On this site `always` DOES get through: "
+                        "than a decoration. Cloudflare's managed "
+                        "challenge is solved too, through "
+                        "TurnstileTaskProxyless — 11s, $0.00145 measured, "
+                        "Challenge page included. The only refusal nothing "
+                        "can buy is PerimeterX's widget-less stub, which is "
+                        "reported as blocked with nothing attempted or "
+                        "billed. On this site `always` DOES get through: "
                         "PerimeterX's denial renders a reCAPTCHA Enterprise "
                         "widget, solved end to end in ~55s for $0.00299, "
                         "after which the page came back with its grid. It is "

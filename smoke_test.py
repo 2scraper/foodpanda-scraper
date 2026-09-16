@@ -655,6 +655,171 @@ def test_markers_that_match_every_page():
 
 
 # ---------------------------------------------------------------------------
+def test_the_readme_documents_what_the_engines_accept():
+    """A README goes stale by standing still while the code grows.
+
+    This one had no flag reference at all: sixteen real flags were documented
+    nowhere but `--help`, which is the family's own §17 finding arriving a
+    second time. Cheap to check, so checked rather than intended.
+
+    Deliberately one-directional on flag names — the README may legitimately
+    mention a flag no ENGINE has (`--fail-on-change` is diff_runs.py's,
+    `--chromium-path` is pyppeteer's, `--proxy-server` is Chromium's own) —
+    but every flag an engine accepts has to appear somewhere in it.
+    """
+    group("The README documents what the engines accept")
+    ok = True
+    readme = open("README.md", encoding="utf-8").read()
+
+    documented = set(re.findall(r"`(--[a-z0-9][a-z0-9-]+)", readme))
+    for path in ("playwright_scraper.py", "puppeteer_scraper.py",
+                 "selenium_scraper.py"):
+        missing = sorted(_parser_flags(path) - documented)
+        ok &= check(f"{path}: every flag it accepts appears in the README"
+                    + (f" (missing: {missing})" if missing else ""),
+                    not missing)
+
+    # Every in-page link resolves. A dead anchor in a 500-line README is
+    # invisible to the person who wrote it and obvious to a first reader.
+    heads = set()
+    for line in readme.splitlines():
+        if line.startswith("#"):
+            slug = re.sub(r"[^\w\s-]", "",
+                          line.lstrip("#").strip().lower()).replace(" ", "-")
+            heads.add(slug)
+    broken = sorted(set(re.findall(r"\]\(#([a-z0-9-]+)\)", readme)) - heads)
+    ok &= check("every in-page link resolves"
+                + (f" (broken: {broken})" if broken else ""), not broken)
+
+    # And the exit codes, which are the output contract's public half.
+    for code in ("3", "4", "5", "6"):
+        ok &= check(f"exit {code} is documented",
+                    re.search(rf"\|\s*`?{code}`?\s*\|", readme) is not None)
+    return ok
+
+
+def test_no_file_claims_a_captcha_cannot_be_solved():
+    """The worst bug this repo shipped was a SENTENCE.
+
+    v0.1.0 said "the captcha solver is inapplicable on this site" and the
+    README told readers a 2captcha key would not help. Every clause was true
+    about THIS CODE and the conclusion was false about the PRODUCT: 2captcha
+    solves enterprise reCAPTCHA and Turnstile, and the repo was simply
+    building the wrong task types. No test could fail on it, no run crashed,
+    and the output was correct.
+
+    When it was fixed, the README was corrected and `--help` was not — so the
+    claim lived on in the surface a user reads first, through a whole
+    release. Hence a check rather than an intention.
+
+    The only honest form of this sentence is "this repo does not implement
+    X", which reads like the TODO it is.
+    """
+    group("No shipped file claims a captcha cannot be solved")
+    ok = True
+
+    # Phrases that assert a LIMIT OF THE PRODUCT. Each was in a shipped file.
+    banned = (
+        "would not help",
+        "will not help with a refusal",
+        "neither helps with a refusal",
+        "no challenge has ever been observed",
+        "the captcha solver is inapplicable",
+        "solver is inapplicable",
+        "this path buys nothing",
+        "2captcha does not solve",
+        "2captcha cannot solve",
+        "cannot be solved by any",
+        "no solver can",
+    )
+    # CHANGELOG.md is exempt, and only it. It carries the phrase twice: once
+    # inside the RELEASED [0.1.0] section, which is history and must not be
+    # rewritten, and once in [0.2.0]'s correction, which quotes it in order to
+    # withdraw it. Quoting a false claim to retract it is the opposite of
+    # making one. smoke_test.py is exempt because this list lives in it.
+    exempt = {"smoke_test.py", "CHANGELOG.md"}
+    shipped = sorted(
+        p for p in os.listdir(".")
+        if p.endswith((".py", ".md")) and p not in exempt)
+    for path in shipped:
+        text = open(path, encoding="utf-8").read().lower()
+        found = [phrase for phrase in banned if phrase in text]
+        ok &= check(f"{path} claims no limit of the PRODUCT"
+                    + (f" (found: {found})" if found else ""), not found)
+
+    # And the positive half: where a limitation IS stated, it has to be about
+    # THIS REPO or about a page with no widget — never about the vendor.
+    parser_text = open("product_parser.py", encoding="utf-8").read()
+    ok &= check("the unsolvable set is named for what it is",
+                "UNSOLVABLE_CHALLENGE_MARKERS" in parser_text)
+    ok &= check("...and every entry in it is a product 2captcha DOES sell, "
+                "so the name means 'not implemented here'",
+                all(m for m in product_parser.UNSOLVABLE_CHALLENGE_MARKERS))
+
+    # The one honest 'unsolvable' on this site is a page with no widget at
+    # all. Assert it is still the reason given, so the word keeps its meaning.
+    stub = html_of("BLOCK_PX_PLAIN")
+    ok &= check("PerimeterX's stub carries no widget",
+                "g-recaptcha" not in stub and "data-sitekey" not in stub)
+    ok &= check("...and is the page the word 'blocked' is reserved for",
+                detect_page_state(stub, 403, url_of("BLOCK_PX_PLAIN"))
+                == "blocked")
+    return ok
+
+
+def _parser_flags(path):
+    """Every long option an engine declares, read from its own source.
+
+    The same idiom the flag-contract group uses: each parser is built inside
+    parse_args(), which also reads sys.argv, so the source is what can be
+    inspected without running it.
+    """
+    source = open(path, encoding="utf-8").read()
+    # `p.` and not a bare `add_argument`: Selenium also calls
+    # options.add_argument("--no-sandbox") to pass Chromium's own switches,
+    # which are not this program's flags and are not the README's business.
+    return set(re.findall(r'\bp\.add_argument\(\s*"(--[a-z0-9-]+)"', source))
+
+
+def test_the_help_text_agrees_with_the_host_table():
+    """A count written in prose drifts away from the table it describes.
+
+    `.co.th` was dropped — it redirects to robinhood.co.th, a different
+    company — and HOSTS went from eleven entries to ten. Three engines and
+    output_writer.py went on saying "eleven country sites" for a whole
+    release, and playwright's --help still listed `.co.th` among the
+    supported ones. `--help` is the first surface a user reads, and it was
+    naming a host the parser refuses.
+    """
+    group("The documented host count agrees with the host table")
+    ok = True
+    n = len(product_parser.HOSTS)
+    ok &= check("the host table holds the ten probed sites", n == 10)
+
+    words = {9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
+    want, overstated = words[n], words.get(n + 1)
+    documents = ("playwright_scraper.py", "puppeteer_scraper.py",
+                 "selenium_scraper.py", "output_writer.py")
+    for path in documents:
+        text = open(path, encoding="utf-8").read().lower()
+        if f"{want} country sites" in text:
+            ok &= check(f"{path} says {want} country sites", True)
+        else:
+            ok &= check(f"{path} does not overstate the count",
+                        f"{overstated} country sites" not in text)
+
+    # And no user-facing text may ADVERTISE a host the parser refuses. This is
+    # the specific way it went wrong: the name outlived the entry.
+    for path in ("playwright_scraper.py", "README.md"):
+        text = open(path, encoding="utf-8").read()
+        for refused in sorted(product_parser.REFUSED_HOSTS):
+            suffix = refused[len("foodpanda"):]          # ".co.th"
+            listed = f"{suffix}, " in text and "foodpanda.pk, .sg" in text
+            ok &= check(f"{path} does not list {refused} as supported",
+                        not listed)
+    return ok
+
+
 def test_the_challenge_is_enterprise_and_solvable():
     group("The challenge is reCAPTCHA Enterprise — and that IS solvable")
     ok = True
@@ -1897,6 +2062,9 @@ def main() -> int:
     ok &= test_pagination()
     ok &= test_page_state()
     ok &= test_markers_that_match_every_page()
+    ok &= test_the_help_text_agrees_with_the_host_table()
+    ok &= test_no_file_claims_a_captcha_cannot_be_solved()
+    ok &= test_the_readme_documents_what_the_engines_accept()
     ok &= test_the_challenge_is_enterprise_and_solvable()
     ok &= test_page_flow_policy()
     ok &= test_scroll_loop()
