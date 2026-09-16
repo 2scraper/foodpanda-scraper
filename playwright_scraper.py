@@ -881,12 +881,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # — which is what the retry loop above already does, by tearing the
         # browser down and launching a fresh one.
         #
-        # The paid path is reached for state "challenge", which NOTHING ON
-        # THIS SITE reaches today: the only challenge foodpanda renders is
-        # reCAPTCHA Enterprise, which captcha_solver.py does not implement,
-        # so such a page is classified "blocked" and no solve is attempted or
-        # billed. Bounded by SOLVES_PER_PAGE regardless, so a path that
-        # becomes reachable after a site change cannot become a bill.
+        # The paid path is reached for state "challenge", which on this site
+        # is PerimeterX's denial page when it renders its reCAPTCHA
+        # Enterprise widget. That solve WORKS — measured ~55s and $0.00299,
+        # after which the page came back with its grid, against a control
+        # where a plain reload cleared the same block 0 of 8 times.
+        #
+        # Reached only AFTER the free re-roll has had its turn, because the
+        # refusal is per-session and a fresh browser clears it for nothing.
+        # Bounded by SOLVES_PER_PAGE so a page that keeps coming back as a
+        # challenge cannot buy one solve per rotation.
         if (page_flow.should_solve(state)
                 and solves_bought < page_flow.SOLVES_PER_PAGE):
             solves_bought += 1
@@ -1712,11 +1716,13 @@ def parse_args():
                         "than a decoration. Cloudflare's managed challenge — "
                         "what a non-browser client gets — is reported as "
                         "blocked instead, so no solve is attempted or billed "
-                        "for it. The solver is therefore INAPPLICABLE on "
-                        "this site rather than untested — there is nothing "
-                        "here for it to solve. The other three 2Captcha "
-                        "paths were run end to end on 2026-09-15 and all "
-                        "work; see the README.")
+                        "for it. On this site `always` DOES get through: "
+                        "PerimeterX's denial renders a reCAPTCHA Enterprise "
+                        "widget, solved end to end in ~55s for $0.00299, "
+                        "after which the page came back with its grid. It is "
+                        "still not the cheapest move — the refusal is "
+                        "per-session and a fresh browser clears it free — so "
+                        "when-blocked stays the default.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or 0.9 "
                         "— the API only accepts these three). Ignored for v2 "
