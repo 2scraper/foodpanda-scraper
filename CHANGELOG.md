@@ -11,6 +11,101 @@ or from a half-empty output file.
 
 ---
 
+## [0.2.0] — 2026-09-16
+
+Everything here is about the same thing: **what this scraper does when
+foodpanda refuses it.** 0.1.0 shipped saying a 2Captcha key would not help.
+That was wrong, and it was wrong in the way that matters most — it reported a
+limit of THIS CODE as a limit of the product.
+
+> **If you read 0.1.0's notes**, two claims in them are now false. A
+> 2Captcha key DOES clear this site's challenges, both of them, and the
+> canary is dispatch-only rather than daily.
+
+### Added
+
+* **reCAPTCHA Enterprise, solved end to end.** foodpanda's PerimeterX denial
+  page renders a v2-shaped `g-recaptcha` container beside a
+  `recaptcha/enterprise.js` loader. 2Captcha solves that
+  (`RecaptchaV2EnterpriseTaskProxyless`); `captcha_solver.py` was simply
+  building the non-enterprise task type. It now carries the page's own answer
+  — the enterprise loader, and `window.grecaptcha.enterprise` — into the
+  task. Measured on a live denial: **~55 seconds, $0.00299**, and the page
+  came back with its full grid. Control, because a solve that coincides with
+  a block expiring proves nothing: a plain same-session reload cleared the
+  same block **0 of 8 times**. The token is what got in.
+
+* **Cloudflare Turnstile, Challenge page included.** The hard half is that a
+  Challenge page publishes no sitekey at all: Cloudflare calls
+  `turnstile.render(container, params)` once and keeps nothing, so `cData`,
+  `chlPageData` and `action` exist only inside that call. Every engine now
+  installs an interception script on the context **before any page script
+  runs** — `add_init_script` in Playwright, `evaluateOnNewDocument` in
+  pyppeteer, CDP `Page.addScriptToEvaluateOnNewDocument` in Selenium, the one
+  thing the three cannot share. Measured against `foodpanda.com`'s own "Just
+  a moment…": all four parameters captured, `TurnstileTaskProxyless`, an
+  837-character token in **11 seconds for $0.00145**, and the page came back
+  as the real site.
+
+  Against expectation, the user agent did **not** matter: the token was
+  minted under a Windows UA while the browser was macOS and Cloudflare took
+  it anyway. The mismatch is logged so it can be ruled out rather than
+  guessed at.
+
+* **`SOLVABLE_PRODUCTS`** — reCAPTCHA v2, v3, both Enterprise variants and
+  Turnstile, in one place, so the answer to "would a key help here" is
+  readable without tracing the marker sets.
+
+### Changed
+
+* **A page with a solvable widget on it is `challenge`, not `blocked`.**
+  Both of this site's refusals now carry one, so the only thing left in
+  `blocked` is PerimeterX's widget-less stub — 4.7 KB, 24 `px-captcha`
+  references, nothing for any solver to work on at any price. Nothing is
+  attempted or billed for that one.
+
+* **The canary is dispatch-only: no schedule, no badge.** This repo runs
+  nothing live on a timer. A green badge for a check that is not happening is
+  as unreadable as one that is always red.
+
+### Fixed
+
+* **A wrong captcha variant, found by spending real money on the first
+  attempt.** The heuristic had no rung for "challenge frame present, no
+  `size`, no `render`", fell through to v3, bought a
+  `RecaptchaV3TaskProxyless` and got `ERROR_CAPTCHA_UNSOLVABLE` after 87
+  seconds — the exact "wrong variant buys a rejected token" failure
+  `captcha_solver.py`'s own docstring warns about. v3 renders no challenge
+  frame at all, so a frame present now settles the variant as a v2 checkbox.
+
+* **The static detector could not see this site's widget.** It bailed unless
+  the markup contained `grecaptcha`, and the denial page carries only the
+  hyphenated class `g-recaptcha` — so anyone debugging from a `--dump-html`
+  capture was told there was no captcha at all.
+
+* **`cf-turnstile` was tried as a marker and thrown away**, which is the
+  family's extension trap arriving for real. 2Captcha's Scraping Browser
+  injects `chrome-extension://…/content/captcha/turnstile/hunter.js` with
+  `data-ts-input="cf-turnstile-response"` into every page it loads, so the
+  string appears once on a **served** Hong Kong listing and **zero** times on
+  the real Cloudflare challenge — a marker that fires on good pages and
+  misses the bad one, which is worse than no marker.
+  `challenges.cloudflare.com` is the one that works: 0 on every served page,
+  5 on the challenge. Caught by this repo's own check, not by review.
+
+* **A sitekey-less Turnstile detection no longer builds a task.** It raises
+  instead. Paying for a request 2Captcha will reject is worse than reporting
+  the page unsolved.
+
+### Tests
+
+**493 offline checks**, up from 470. The new ones pin the Challenge-page task
+shape, the standalone widget's task shape, the sitekey-less refusal, the
+extension trap in both directions (present on a served page, absent from the
+challenge) and the v1 API's refusal to half-try Turnstile.
+
+---
+
 ## [0.1.0] — 2026-09-15
 
 The first release on this scraper family's architecture. It replaces the
@@ -52,10 +147,8 @@ three engines that must agree.
   captures and refuses to write unless each one parses identically to its
   untrimmed original, column for column.
 * **Over 400 offline checks**, a Docker image built and run in CI, and a
-  dispatch-only canary that skips with a notice when no secret is set. It
-  has no schedule and no badge: this repo runs nothing live on a timer, and a
-  green badge for a check that is not happening is as unreadable as one that
-  is always red.
+  daily canary that SKIPS with a notice rather than failing when no proxy
+  secret is set.
 
 ### Fixed — found by running it against the live site
 
@@ -146,48 +239,12 @@ found only by running the SECONDARY engines rather than just the primary one
 
 * **A Scraping Browser profile expires in about a day**, after which the
   endpoint answers HTTP 401 `deny_no_user`. That makes it the best path for a
-  run you are watching and the wrong secret for anything scheduled. The
-  canary here is dispatch-only so it does not matter in practice, and an
-  expired endpoint is reported as a SKIP with its cause named rather than as
-  a failure. The engine's
+  run you are watching and the wrong secret for a scheduled job, so the daily
+  canary prefers a durable `FOODPANDA_PROXY` and reports an expired endpoint
+  as a SKIP with its cause named rather than as a failure. The engine's
   connect error now names both causes — 500 is a busy profile, 401 is a gone
   one — because telling a reader to wait for another run when the profile has
   expired is a wasted afternoon.
-
-* **Two captcha bugs found by spending real money on the first attempt.**
-  The variant heuristic had no rung for "challenge frame present, no `size`,
-  no `render`", so it fell through to v3, bought a
-  `RecaptchaV3TaskProxyless` and got `ERROR_CAPTCHA_UNSOLVABLE` after 87
-  seconds — the exact "wrong variant buys a rejected token" failure
-  `captcha_solver.py`'s own docstring warns about. v3 renders no challenge
-  frame at all, so a frame present now settles the variant as a v2 checkbox.
-  Separately, the STATIC detector could not see this widget either: it bails
-  unless the markup contains `grecaptcha`, and foodpanda's denial page
-  carries only the hyphenated class `g-recaptcha` — so anyone debugging from
-  a `--dump-html` capture was told there was no captcha at all.
-
-* **Cloudflare Turnstile is implemented, Challenge page included.** The
-  hard half is that a Challenge page publishes no sitekey: Cloudflare calls
-  `turnstile.render(container, params)` once and keeps nothing, and `cData`,
-  `chlPageData` and `action` exist only in that call. So every engine now
-  installs an interception script on the context before any page script runs
-  — `add_init_script`, `evaluateOnNewDocument` and CDP
-  `Page.addScriptToEvaluateOnNewDocument` respectively. Measured 2026-09-16
-  against foodpanda.com's own "Just a moment…": all four parameters
-  captured, `TurnstileTaskProxyless`, solved in 11 seconds for **$0.00145**,
-  and the page came back as the real site. A static detection with no sitekey
-  now REFUSES to build a task rather than spending money on a request
-  2Captcha would reject.
-
-* **`cf-turnstile` was tried as a marker and thrown away**, which is §8's
-  extension trap arriving for real. 2Captcha's Scraping Browser injects
-  `chrome-extension://…/content/captcha/turnstile/hunter.js` with
-  `data-ts-input="cf-turnstile-response"` into every page it loads, so the
-  string appears once on a SERVED Hong Kong listing and **zero** times on the
-  real Cloudflare challenge — a marker that fires on good pages and misses
-  the bad one. Caught by this repo's own §18 check.
-  `challenges.cloudflare.com` is the marker that works: 0 on every served
-  page, 5 on the challenge.
 
 ### Known limitations, stated rather than worked around
 
@@ -198,17 +255,11 @@ found only by running the SECONDARY engines rather than just the primary one
   sites. A parser written against markup nobody has seen is a guess with a
   docstring, so the mode is absent rather than broken. Such a URL is refused
   with that reason.
-* **reCAPTCHA Enterprise is now implemented and solved.** An earlier draft of
-  this repo reported foodpanda's challenge as unsolvable and told readers a
-  2Captcha key would not help — which confused a limit of THIS CODE with a
-  limit of the product. 2Captcha solves enterprise reCAPTCHA
-  (`RecaptchaV2EnterpriseTaskProxyless`) and Cloudflare Turnstile;
-  `captcha_solver.py` was simply building the non-enterprise task types. It
-  now carries the page's own answer — the enterprise loader, and
-  `window.grecaptcha.enterprise` — into the task, and a live PerimeterX
-  denial was solved end to end: ~55 seconds, $0.00299, and the page came back
-  with its full grid. Control: a plain same-session reload cleared the same
-  block **0 of 8 times**, so the token is what got in.
+* **The captcha solver is inapplicable on this site**, which is not the
+  same as untested: the only challenge foodpanda renders is reCAPTCHA
+  Enterprise, which this project does not implement, so no solve is ever
+  attempted and no key is ever charged. The other three paid paths WERE run
+  end to end on 2026-09-15 — see "Verified live" below.
 * **foodpanda.co.th is NOT a foodpanda site and is refused with that
   reason.** Measured 2026-09-15 through the Scraping Browser: it answers
   HTTP 200 and redirects to **robinhood.co.th**, a different company, with
@@ -218,4 +269,5 @@ found only by running the SECONDARY engines rather than just the primary one
   of foodpanda's assets — and reported exit 3, sending the reader after a
   proxy problem that does not exist (§5's `mediamarkt.lu` case).
 
+[0.2.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.0
 [0.1.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.1.0
