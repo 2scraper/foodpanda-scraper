@@ -73,7 +73,7 @@ import env_config
 import page_flow
 import product_parser
 from diff_runs import HOURS_FIELDS, TRACKED_FIELDS, diff_products
-from output_writer import (COMPLETE_STOP_REASONS, EXIT_BLOCKED,
+from output_writer import (EXIT_FETCH_FAILED, COMPLETE_STOP_REASONS, EXIT_BLOCKED,
                            EXIT_NO_PRODUCTS, EXIT_PARTIAL,
                            LIST_CSV_SEPARATOR, Product, ROW_CLASS_BY_MODE,
                            SOURCE_DEFAULT, UNIQUE_BY_SKU_MODES, dedupe_by_key,
@@ -1273,8 +1273,8 @@ def test_writers_and_finish_run():
                               final_url="https://www.foodpanda.pk/city/lahore")
         ok &= check("a run where every load timed out is NOT exit 4",
                     code != EXIT_NO_PRODUCTS)
-        ok &= check("...it is partial, naming the run rather than the listing",
-                    code == EXIT_PARTIAL)
+        ok &= check("...it is exit 5, naming the run rather than the listing",
+                    code == EXIT_FETCH_FAILED)
         ok &= check("...and still writes no sidecar (nothing was written)",
                     not os.path.exists(prefix_to + ".meta.json"))
 
