@@ -12,31 +12,27 @@ body:
 
         A few things answer most reports faster than we can:
 
-        - **Everything exit 3?** Check whether the run was **headless** before
-          you check anything else. Akamai refuses a headless browser on this
-          site whatever the exit address — measured HTTP 403 from four
-          residential exits and one datacentre address, against HTTP 200 and
-          the full catalogue from those very same addresses with a real
-          window. `--headful` is the default here; a proxy does not fix it,
-          and `--cdp-endpoint` is the other path measured to work.
-        - **`price` null on some rows?** That is almost certainly correct:
-          every blank price is a lot whose reserve has not been met, and the
-          row carries `reserve_price_set: true` to say so. What is NOT
-          correct is a null price with no reserve flag — that one is worth
-          this issue.
-        - **Zero rows?** You may be on a page that has none: one page past the
-          end of a listing, or a search that matched nothing (that one answers
-          200 with "No results" **and 24 suggested lots**, which this scraper
-          deliberately does not parse). Both are exit 4 and correct answers.
-          See [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
-        - **`rating` and `review_count` empty on every row?** Expected: this
-          site publishes no per-lot rating. The seller's feedback is in
-          `seller_score` and `seller_feedback_count` on a `--mode lot` row.
-        - **The run stopped at page 100?** That is the site's own cap, not a
-          bug. Past it the site returns page 100's own lots under HTTP 200.
-        - **Wrong language?** The locale is a path segment (`/en/`, `/nl/`,
-          `/de/`), not something the exit IP decides. Prices are in euro on
-          all 18 locales.
+        - **Everything exit 3?** Check whether the run was **headless**
+          before you check anything else. This site refuses a headless
+          browser: measured 0 of 4 headless navigations served (HTTP 403 every
+          time) against 4 of 4 with a real window. `--headful` is the default
+          here, and `--cdp-endpoint` is the other path measured to work.
+        - **Exit 3 some of the time?** PerimeterX's refusal is a matter of
+          degree and a property of the session. Let `--retries` work (each
+          attempt is a fresh browser), and raise `--retry-delay` and
+          `--delay`. See [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
+        - **Zero rows?** You may be on a directory rather than a listing —
+          `/city` and `/city/{city}/area` list links, not vendors — or one
+          page past the end of a listing. Both are exit 4 and correct
+          answers.
+        - **`review_count` stuck at 100, or `discount_pct` too high?** Read
+          `review_count_is_floor` and `discount_is_upper_bound`. The site
+          prints `(100+)` and `Up to 35% off`.
+        - **`delivery_fee`, `delivery_time`, `price_level` null on every
+          row?** Those are published on the country home page only;
+          `page_kind` says which page you scraped.
+        - **Two runs disagree about many rows?** That is `is_open`, a
+          point-in-time reading, and the clock.
 
   - type: dropdown
     id: engine
@@ -85,7 +81,7 @@ body:
       placeholder: |
         python3 playwright_scraper.py \
           --url "https://www.foodpanda.pk/city/lahore/area/gulberg" \
-          --pages 3 --out grills
+          --pages 3
     validations:
       required: true
 
@@ -105,7 +101,7 @@ body:
     attributes:
       label: What you expected instead
       placeholder: >-
-        96 products, as the README says a category page yields.
+        48 vendors per page, as the README says a city listing yields.
     validations:
       required: true
 

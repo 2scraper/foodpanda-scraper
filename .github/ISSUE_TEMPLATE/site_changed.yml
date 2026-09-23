@@ -9,36 +9,25 @@ body:
         its own report because the fix is different from a code bug:
         something on foodpanda.pk moved.
 
-        Useful to know before filing, because it narrows the fix a lot — this
-        parser reads **two different sources for two halves of a row**:
-
-        - **The rows** come from the site's own SSR payload,
-          `<script id="__NEXT_DATA__">`, which is in the first response and
-          needs no JavaScript. Titles, ids, urls, images, auction ids and the
-          reserve flag all come from there.
-        - **The money** comes from the rendered card
-          (`.c-lot-card__price` and its siblings), because the payload does
-          not carry it: bids arrive at hydration.
-
-        So "no rows at all" and "rows with no prices" are two different
-        breakages with two different fixes, and `price_source` on the rows
-        tells you which happened: `next_data+dom` is healthy, `next_data`
-        means nothing hydrated.
+        Useful to know before filing, because it narrows the fix a lot: this
+        parser reads the rendered **vendor tile**
+        (`li[class*="bds-c-vendor-tile"]`, whose `data-testid` is the vendor
+        code), with `a[href^="/restaurant/"]` as the fallback anchor. The one
+        JSON-LD block on a listing names only a handful of vendors and is a
+        cross-check, not a path. CONTRIBUTING.md lists every anchor.
 
   - type: dropdown
     id: what_broke
     attributes:
       label: What stopped matching
       options:
-        - No rows at all on a page that visibly has lots (the payload moved)
-        - Rows come out with no prices (the card, or its price class, moved)
-        - bid_kind is null on rows that have a price (the status label moved)
-        - A null price with no reserve_price_set flag (the invariant broke)
-        - favorite_count empty on every row (the card's counter moved)
-        - Pagination stops early, repeats a page, or runs past the 100 cap
-        - A lot page returns nothing (--mode lot)
-        - The auctions index returns nothing (--mode auctions)
-        - A no-results search returns 24 suggested lots as if they were real
+        - No rows at all on a page that visibly has vendors (the tile moved)
+        - A specific field is null or wrong (rating, review_count, cuisines, sku, URL)
+        - Cuisines full of delivery times or other info rows (the labels moved)
+        - The JSON-LD cross-check warns on every page
+        - Pagination stops early or repeats a page
+        - (page, position) not unique across a run
+        - A refusal is misclassified (exit 3 on a good page, or rows from a denial page)
         - Something else
     validations:
       required: true
@@ -48,10 +37,10 @@ body:
     attributes:
       label: URL
       description: >-
-        The exact URL, its locale prefix, and how the browser was reached.
+        The exact URL (which country site), and how the browser was reached.
         Please say whether the run was headful or over --cdp-endpoint: a
         headless run is refused by the site and is not a parser problem.
-      placeholder: "https://www.foodpanda.pk/city/lahore/area/gulberg (locale: /en/, headful local Chrome, exit: NL residential)"
+      placeholder: "https://www.foodpanda.pk/city/lahore/area/gulberg (headful local Chrome, residential exit)"
     validations:
       required: true
 
@@ -63,12 +52,9 @@ body:
         Whichever of these you can get. A capture beats a description, and
         `--dump-html` writes one on success as well as on failure.
 
-        - The payload as the page actually serves it:
-          `python3 -c "import json,re;h=open('dump.html').read();d=json.loads(re.search(r'id=.__NEXT_DATA__.[^>]*>(.*?)</script>',h,1).group(1));print(sorted(d['props']['pageProps']))"`
-        - For a price problem: one whole `article.c-lot-card__container` from
-          devtools, and the amount the page shows for that lot.
-        - For a `bid_kind` problem: the exact label the card prints
-          ("Current bid", "Aktuelles Gebot", ...) and the locale.
+        - The `--dump-html` snapshot of the page.
+        - Or one whole `li[class*="bds-c-vendor-tile"]` element from devtools.
+        - For a field problem: the value you got, and the value the tile shows.
       render: text
     validations:
       required: true
@@ -78,5 +64,5 @@ body:
     attributes:
       label: Anything else
       description: >-
-        Whether it reproduces on a second engine, whether it reproduces in a
-        second locale, and when it last worked.
+        Whether it reproduces on a second engine, whether it reproduces on a
+        second country site, and when it last worked.

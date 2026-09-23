@@ -287,12 +287,10 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 def parse_args():
     p = argparse.ArgumentParser(
         description="foodpanda vendor-listing scraper — 2captcha Scraper API edition (no "
-                    "local browser). NOTE: these pages DO need JavaScript, "
-                    "and their grid hydrates only as the page is scrolled, "
-                    "so a single fetch returns about 5 products where a "
-                    "browser engine returns 60. Pass --cdp-url to reach the "
-                    "site at all; see this file's docstring for the measured "
-                    "numbers, and prefer playwright_scraper.py.")
+                    "local browser). foodpanda server-renders its grid, so "
+                    "one request returns the tiles a browser would see; it "
+                    "fetches only the URL it is given and does not paginate. "
+                    "See this file's docstring for the measured numbers.")
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
@@ -300,13 +298,12 @@ def parse_args():
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
-                   help="A foodpanda listing URL. Pass --wait-element "
-                        "'[data-stid=\"lodging-card-responsive\"]' with it: "
-                        "the grid arrives over client-side GraphQL, so a "
-                        "fetch that does not render returns a shell with no "
-                        "tiles in it. Required, unless FOODPANDA_URL is set in the "
-                        "environment or in .env.")
-    p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
+                   help="A foodpanda listing URL. The grid is in the first "
+                        "response, so --wait-element "
+                        "\"li[class*='bds-c-vendor-tile']\" is cheap insurance "
+                        "rather than required. Required, unless FOODPANDA_URL "
+                        "is set in the environment or in .env.")
+    p.add_argument("--category", default=None, help="Accepted for flag parity with the browser engines. This client does not record it: the `category` column holds the vendor's own cuisines, read off the tile.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="foodpanda_vendors_scraperapi", help="Output file prefix")
     p.add_argument("--timeout", type=int, default=60,

@@ -11,6 +11,40 @@ or from a half-empty output file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **`scraper_api_client.py --help` described two other sites.** Its
+  description said the pages need JavaScript and a single fetch returns
+  about 5 products, and `--url` told you to wait for a
+  `lodging-card-responsive` element that arrives over GraphQL. Neither is
+  true here: foodpanda server-renders its grid, and the docstring's own
+  measurement is 48 of 48 vendors from one request. `--category` no longer
+  claims to default to a URL segment — this client does not use it.
+- **Issue templates described an auction site.** The bug-report hints talked
+  about lots, reserve prices, a page-100 cap and `/en/` locales, and the
+  site-change template's anchors were `__NEXT_DATA__` and lot cards.
+  Rewritten from this repo's README, CONTRIBUTING and TROUBLESHOOTING:
+  headless refusal, PerimeterX retries, directory URLs, the `(100+)` and
+  `Up to` flags, home-page-only delivery columns.
+- The pyppeteer and Selenium engines' docstrings listed a `--mode product`
+  and gave a Tokopedia path as their `--url` example; both now describe the
+  one `listing` mode and a real area listing. Their unreachable
+  `--mode product` sidecar branch (a shop's id and slug, which nothing here
+  produces) is gone; the listing branch is unchanged.
+- Comments that told another site's story as this one's: `/p/<slug>` hubs,
+  "hub category", a search grid over GraphQL, a `keyword=kopi` tracking tail
+  and a detail page's buy box in the engines; an Akamai 394-byte refusal and
+  auction lots in `captcha_solver.py`; a Tokopedia no-results string, an
+  HTTP/2 stream reset, an Orlando search and `shop_rating` in
+  `output_writer.py`. Replaced with what this repo measured, or attributed
+  to the sibling where it happened. `captcha_solver.py` no longer points at
+  a "No DataDome solver" section that does not exist.
+- `SECURITY.md` said this project has no releases or tags; it has both.
+- The access badge now says what the README measures: no account needed,
+  from a residential IP.
+
 ## [0.2.2] — 2026-09-16
 
 ### Fixed

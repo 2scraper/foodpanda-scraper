@@ -9,9 +9,9 @@ spends money — the decisions that determine all three live in page_flow.py
 and output_writer.finish_run(), so this file is browser plumbing and nothing
 else.
 
-    --mode listing   (default)  category grids and search results
-    --mode product              one /product/ page, with brand, EAN,
-                                description and the full image list
+    --mode listing   (the only mode)  the vendor tiles on a country home
+                                      page, a /city/{city} listing or a
+                                      /city/{city}/area/{area} listing
 
 Two limits of this engine, stated here rather than left to be discovered.
 Neither is a bug in this code and neither can be fixed from here:
@@ -34,7 +34,7 @@ Playwright engine.
 Usage
 -----
     python selenium_scraper.py \\
-        --url "https://www.foodpanda.pk/p/makanan-minuman/minuman/kopi-bubuk" --pages 3
+        --url "https://www.foodpanda.pk/city/lahore/area/gulberg" --pages 3
 
 Requires: pip install -r requirements.txt -r requirements-selenium.txt
           Selenium 4 fetches a matching chromedriver itself; a local Chrome
@@ -139,9 +139,6 @@ class PageOutcome:
     # What the lazy-load scroll did, and crucially whether it SETTLED. A page
     # whose grid was still growing when the budget ran out is partial.
     scroll: Optional[dict] = None
-    # In --mode product, the seller's own id/name/slug from the page's Apollo
-    # cache.
-    shop_facts: Optional[dict] = None
 
     @property
     def ok(self) -> bool:
@@ -576,9 +573,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         html = d["content"]() or ""
         state = page_flow.classify(html, url=d["current_url"]())
 
-        # "Not painted yet" is not a fault. A SEARCH grid arrives with the
-        # client-side GraphQL response, so at domcontentloaded the page is a
-        # shell with no grid in it — classified naively that is "unknown",
+        # "Not painted yet" is not a fault. A page foodpanda served with no
+        # grid in it yet is a SHELL — classified naively that is "unknown",
         # and "unknown" retries. Wait for the anchor and re-classify BEFORE
         # the retry decision. Mirrors playwright_scraper exactly; see
         # page_flow.is_unpainted.
@@ -753,13 +749,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                          int(timeout_s * 1000))
         time.sleep(0.5)
         if found <= threshold:
-            # Not an error on its own, and what it MEANS depends on the
-            # mode — which is why the message does too. A listing page with
-            # no grid is a correct answer (a taxonomy hub, or one page past
-            # the end); a detail page whose buy box never painted is a
-            # different thing entirely, and on this site it is usually just
-            # slow rather than absent, because the row is parsed out of the
-            # page's JSON-LD and not out of the buy box.
+            # Not an error on its own. A listing page with no vendor tile is a
+            # correct answer for a directory (`/city`, `/city/{city}/area`)
+            # or one page past the end of a listing.
             logger.info("No vendor tiles appeared within %.0fs. If this "
                         "URL is one page past the end of a listing, that is "
                         "the expected answer and the run will report 0 rows "
@@ -799,9 +791,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # --cdp-endpoint the Scraping Browser's own auto-solve extension injects
     # such markers into every page it loads.
     # Only for a state page_flow already counts as BLOCKED. An EMPTY page is
-    # a correct answer, and a live run of a /p/<slug> hub reported exit 3 on
-    # a page the site had plainly served because the hub's own performance
-    # script names `akamaihd.net`. Mirrors playwright_scraper exactly.
+    # a correct answer, and on the sibling tokopedia-scraper a live run of a
+    # hub page reported exit 3 on a page that site had plainly served because
+    # its own performance script names `akamaihd.net`. Mirrors
+    # playwright_scraper exactly.
     vendor = (detect_bot_challenge(html, url=d["current_url"]())
               if page_flow.counts_as_blocked(state) else None)
     if vendor:
@@ -888,14 +881,12 @@ def scrape(args) -> int:
     outcomes: List[PageOutcome] = []
     seen_keys = set()
     blocked = False
-    # Both modes are one row per product, so `sku` is the key for both.
+    # Every row is one vendor, so `sku` is the key.
     dedupe_key = "sku"
-    # Only --mode product is single-page. A SHOP FRONT paginates exactly like
-    # a category listing — ?page=N, the same tiles — and treating it as
-    # single-page made `--mode shop --pages 2` fetch one page and report
-    # "complete", which is the silent-success failure this family exists to
-    # avoid. Found on the first live shop run.
-    stop_reason = "single_page_mode" if args.mode == "product" else "completed"
+    # There is no single-page mode here: every supported URL is a listing,
+    # and the home page, which does not paginate, stops because no page 2
+    # is found for it. Mirrors playwright_scraper.
+    stop_reason = "completed"
 
     pool = proxy_pool_from_args(args)
     if pool and args.cdp_endpoint:
@@ -1037,33 +1028,23 @@ def scrape(args) -> int:
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
-    # One-per-run context, in the sidecar rather than repeated down a column.
-    # Mirrors the other two engines exactly: the seller's own facts in
-    # --mode product, and the scroll trace plus the page's own result header
-    # in --mode listing, because on an infinitely-scrolling site those are
-    # what say how much of the listing the run actually saw.
+    # One-per-run context, in the sidecar rather than repeated down a column:
+    # the scroll trace plus the page's own result header, because on a
+    # scrolled page those are what say how much of the listing the run
+    # actually saw.
     extra = None
-    if args.mode == "product":
-        first = next((o for o in outcomes if o.ok and o.shop_facts), None)
-        if first is not None and first.shop_facts:
-            extra = dict(first.shop_facts)
-            logger.info("Shop: %s (id %s, /%s).",
-                        extra.get("shop_name") or "?",
-                        extra.get("shop_id") or "?",
-                        extra.get("shop_slug") or "?")
-    else:
-        scrolls = {o.page_num: o.scroll for o in outcomes if o.scroll}
-        headers = {o.page_num: o.header for o in outcomes if o.header}
-        unsettled = sorted(n for n, s in scrolls.items()
-                           if s and not s.get("settled"))
-        if scrolls or headers:
-            extra = {"scroll": scrolls, "result_header": headers,
-                     "pages_still_growing": unsettled}
-        if unsettled:
-            logger.warning(
-                "Page(s) %s were still loading more products when the scroll "
-                "budget ran out, so their row counts are floors rather than "
-                "the listing.", ", ".join(str(n) for n in unsettled))
+    scrolls = {o.page_num: o.scroll for o in outcomes if o.scroll}
+    headers = {o.page_num: o.header for o in outcomes if o.header}
+    unsettled = sorted(n for n, s in scrolls.items()
+                       if s and not s.get("settled"))
+    if scrolls or headers:
+        extra = {"scroll": scrolls, "result_header": headers,
+                 "pages_still_growing": unsettled}
+    if unsettled:
+        logger.warning(
+            "Page(s) %s were still loading more vendors when the scroll "
+            "budget ran out, so their row counts are floors rather than "
+            "the listing.", ", ".join(str(n) for n in unsettled))
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
