@@ -6,7 +6,7 @@
 [![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue)](pyproject.toml)
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%C2%B7%20Selenium%20%C2%B7%20pyppeteer%20%C2%B7%20CDP-lightgrey)](#engines)
-[![runs without an account](https://img.shields.io/badge/runs-without%20an%20account-brightgreen)](#do-i-need-to-buy-anything)
+[![runs without an account, from a residential IP](https://img.shields.io/badge/runs%20without%20an%20account-residential%20IP-brightgreen)](#do-i-need-to-buy-anything)
 
 Scrapes **foodpanda vendor listings** — every restaurant and shop tile the
 site puts on a city, area or home page, with its rating, review count,
