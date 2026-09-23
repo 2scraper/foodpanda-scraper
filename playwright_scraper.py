@@ -160,8 +160,8 @@ class PageOutcome:
     load_failed: bool = False
     # The page_flow state this page came back as ("content", "blocked",
     # "challenge", "empty", "unknown"). Carried so the caller can tell an
-    # EMPTY page — a /p/<slug> hub, a no-match query, or one page past the
-    # end of a listing — from a page that failed. Both produce zero rows and
+    # EMPTY page — the site's 404 document, a directory with no tiles, or one
+    # page past the end of a listing — from a page that failed. Both produce zero rows and
     # they mean opposite things.
     state: Optional[str] = None
     # What the listing itself said its catalogue size was. Always None on
@@ -393,10 +393,9 @@ def _same_url(a: str, b: str) -> bool:
     fetching — the exact divergence page_flow.py exists to prevent,
     reproduced inside one engine.
 
-    On this site the comparison has to strip a long tracking tail: a listing
-    anchor arrives with `?extParam=…keyword=kopi&search_id=…&src=search` and
-    a detail page's own canonical arrives with a UTM triple, so two views of
-    one page never match unless both sides are cleaned.
+    On this site the comparison has to strip the tracking parameters in
+    product_parser.TRACKING_PARAMS (`utm_*`, click ids, `src`), so two views
+    of one page never match unless both sides are cleaned.
     """
     return page_flow.comparable(a) == page_flow.comparable(b)
 
@@ -890,14 +889,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         html = _content_when_settled(session.page) or ""
         state = _classify(session.page, html)
 
-        # "Not painted yet" is not a fault, and telling it apart from one is
-        # what the first live search run of this engine got wrong. A CATEGORY
-        # listing server-renders its grid container, so it classifies as
-        # content at domcontentloaded; a SEARCH grid arrives with the
-        # client-side GraphQL response, so at that moment the page is a
-        # 608 KB shell with no grid in it. Classified naively that is
-        # "unknown", "unknown" retries, and the run fetched the page twice,
-        # scrolled not at all and reported 0 rows with exit 4.
+        # "Not painted yet" is not a fault. A page foodpanda served, built out
+        # of its own assets but with no grid in it yet, is a SHELL (see
+        # page_flow): classified naively it would be "unknown", and "unknown"
+        # retries — which on the sibling tokopedia-scraper fetched a page
+        # twice, scrolled not at all and reported 0 rows with exit 4.
         #
         # So wait for the anchor and re-classify BEFORE the retry decision.
         # See page_flow.is_unpainted.
@@ -954,8 +950,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
-            # a CORRECT one — a hub category has no grid, and one page past
-            # the end of a listing has no products — so retrying it would
+            # a CORRECT one — the site's own 404 document, or one page past
+            # the end of a listing — so retrying it would
             # spend the user's budget re-confirming the same right answer,
             # and rotating the exit would blame an address for the URL it was
             # given.
@@ -1078,13 +1074,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             session.page.wait_for_timeout, selector, threshold, content_timeout)
         session.page.wait_for_timeout(500)
         if found <= threshold:
-            # Not an error on its own, and what it MEANS depends on the
-            # mode — which is why the message does too. A listing page with
-            # no grid is a correct answer (a taxonomy hub, or one page past
-            # the end); a detail page whose buy box never painted is a
-            # different thing entirely, and on this site it is usually just
-            # slow rather than absent, because the row is parsed out of the
-            # page's JSON-LD and not out of the buy box.
+            # Not an error on its own. A listing page with no vendor tile is a
+            # correct answer for a directory (`/city`, `/city/{city}/area`)
+            # or one page past the end of a listing.
             logger.info("No vendor tiles appeared within %.0fs. If this "
                         "URL is one page past the end of a listing, that is "
                         "the expected answer and the run will report 0 rows "
@@ -1139,10 +1131,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # is the "detected is not blocking" rule the captcha default follows,
     # applied to the blocking decision instead of the spending one. But
     # `state != "content"` is still too wide: an EMPTY page is a correct
-    # answer, and a live run of a /p/<slug> hub reported exit 3 on a 191 KB
-    # page the site had plainly served, because the hub's own performance
-    # script names `akamaihd.net` and "akamai" was in the marker list. Both
-    # halves were wrong; the marker is gone (see
+    # answer, and on the sibling tokopedia-scraper a live run of a hub page
+    # reported exit 3 on a 191 KB page that site had plainly served, because
+    # its own performance script names `akamaihd.net` and "akamai" was in the
+    # marker list. Both halves were wrong; the marker is gone (see
     # product_parser.BOT_CHALLENGE_MARKERS) and this now only refines the
     # REASON for a page the policy had already given up on.
     vendor = (detect_bot_challenge(html, url=session.page.url)
@@ -1346,12 +1338,11 @@ def scrape(args) -> int:
     outcomes: List[PageOutcome] = []
     seen_keys = set()
     blocked = False
-    # Both modes are one row per product, so `sku` is the key for both.
+    # Every row is one vendor, so `sku` is the key.
     dedupe_key = "sku"
     # Why the loop ended. "completed" means every requested page was fetched;
     # "no_new_products" means the listing itself ran out (also a complete
-    # result). "single_page_mode" is complete by construction — a detail page
-    # has no page 2. Anything else is an early stop, and the run is only a
+    # result). Anything else is an early stop, and the run is only a
     # partial view.
     # There is no single-page mode here: every supported URL is a listing,
     # and the one listing that does not paginate — the home page — still runs
