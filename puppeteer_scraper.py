@@ -917,7 +917,8 @@ def scrape(args) -> int:
     # single-page made `--mode shop --pages 2` fetch one page and report
     # "complete", which is the silent-success failure this family exists to
     # avoid. Found on the first live shop run.
-    stop_reason = "single_page_mode" if args.mode == "product" else "completed"
+    # Always "completed": there is no single-page mode here.
+    stop_reason = "completed"
 
     pool = proxy_pool_from_args(args)
     if pool and args.cdp_endpoint:
@@ -1070,27 +1071,23 @@ def scrape(args) -> int:
     # in --mode listing, because on an infinitely-scrolling site those are
     # what say how much of the listing the run actually saw.
     extra = None
-    if args.mode == "product":
-        first = next((o for o in outcomes if o.ok and o.shop_facts), None)
-        if first is not None and first.shop_facts:
-            extra = dict(first.shop_facts)
-            logger.info("Shop: %s (id %s, /%s).",
-                        extra.get("shop_name") or "?",
-                        extra.get("shop_id") or "?",
-                        extra.get("shop_slug") or "?")
-    else:
-        scrolls = {o.page_num: o.scroll for o in outcomes if o.scroll}
-        headers = {o.page_num: o.header for o in outcomes if o.header}
-        unsettled = sorted(n for n, s in scrolls.items()
-                           if s and not s.get("settled"))
-        if scrolls or headers:
-            extra = {"scroll": scrolls, "result_header": headers,
-                     "pages_still_growing": unsettled}
-        if unsettled:
-            logger.warning(
-                "Page(s) %s were still loading more products when the scroll "
-                "budget ran out, so their row counts are floors rather than "
-                "the listing.", ", ".join(str(n) for n in unsettled))
+    # The `--mode product` half of this went: "product" is not a mode
+    # this repo has, so that branch had never run, and
+    # playwright_scraper.py carries no such branch at all. What it
+    # guarded was a shop-facts log for a mode that does not exist;
+    # the `else` below is the half that was doing the work.
+    scrolls = {o.page_num: o.scroll for o in outcomes if o.scroll}
+    headers = {o.page_num: o.header for o in outcomes if o.header}
+    unsettled = sorted(n for n, s in scrolls.items()
+                       if s and not s.get("settled"))
+    if scrolls or headers:
+        extra = {"scroll": scrolls, "result_header": headers,
+                 "pages_still_growing": unsettled}
+    if unsettled:
+        logger.warning(
+            "Page(s) %s were still loading more products when the scroll "
+            "budget ran out, so their row counts are floors rather than "
+            "the listing.", ", ".join(str(n) for n in unsettled))
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,

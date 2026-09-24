@@ -2180,10 +2180,51 @@ def test_scraper_api_waitfor_object_and_http_code():
 
 
 
+def test_no_engine_branches_on_a_mode_that_does_not_exist():
+    """No engine may branch on a mode this repo does not have.
+
+    A repo scaffolded from a sibling inherits its MODE NAMES in guards, and
+    a guard on a mode that does not exist never runs. Found across the
+    family on 2026-09-24: two engines here guarded a block on `--mode product`, which
+    this repo has never had, while the primary engine carried no such
+    branch at all.
+    """
+    import glob as _glob
+    modes = set(ROW_CLASS_BY_MODE) if "ROW_CLASS_BY_MODE" in dir() else set()
+    try:
+        from output_writer import ROW_CLASS_BY_MODE as _rc
+        modes = set(_rc)
+    except Exception:
+        pass
+    try:
+        from product_parser import ALL_MODES as _am
+        modes |= set(_am)
+    except Exception:
+        pass
+    ok = check("the repo declares its modes (%s)" % sorted(modes), bool(modes))
+    ok = ok
+    for path in sorted(_glob.glob(os.path.join(REPO_ROOT, "*_scraper.py"))):
+        eng = os.path.basename(path)
+        tree = ast.parse(open(path, encoding="utf-8").read(), eng)
+        ghosts = sorted({n.comparators[0].value for n in ast.walk(tree)
+                         if isinstance(n, ast.Compare)
+                         and isinstance(n.left, ast.Attribute)
+                         and n.left.attr == "mode"
+                         and n.comparators
+                         and isinstance(n.comparators[0], ast.Constant)
+                         and isinstance(n.comparators[0].value, str)
+                         and n.comparators[0].value not in modes})
+        ok &= check("%s branches only on real modes%s"
+                    % (eng, "" if not ghosts else " (ghost: %s)" % ghosts),
+                    not ghosts)
+    return ok
+
+
 def main() -> int:
     ok = True
     skips = []
 
+    ok &= test_no_engine_branches_on_a_mode_that_does_not_exist()
     ok &= test_numbers_and_currencies()
     ok &= test_values_on_real_fixtures()
     ok &= test_urls_and_hosts()
