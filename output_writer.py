@@ -235,10 +235,10 @@ def dedupe_by_key(rows: Sequence[Any], seen: Set[str], key: str = "sku") -> List
     `seen` is mutated in place, so callers thread the same set across pages —
     a stale or repeating next-page link then re-parses a page without
     duplicating its rows into the final output. On this site a healthy
-    two-page run drops NOTHING: page 1 and page 2 of one Orlando search
-    shared 0 of 50 titles, measured. So any non-zero drop count here is worth
-    reading — the likeliest cause is a next-press that did not take and
-    re-parsed the page it was already on.
+    two-page run should drop nothing: a cold `?page=2` returned 48 tiles
+    sharing no vendor code with page 1, measured (see page_flow). So any
+    non-zero drop count here is worth reading — the likeliest cause is a
+    page that re-served the one before it.
 
     A row with no key is always kept: there is nothing to check a duplicate
     against, and dropping it would be a silent data loss rather than a
@@ -308,19 +308,18 @@ EXIT_NO_PRODUCTS = 4
 # search genuinely matched nothing" from "something stood between us and the
 # content". See product_parser.detect_bot_challenge.
 #
-# On this site this code specifically does NOT cover the three ways to get a
-# real page with no products on it: a `/p/<slug>` discovery hub, which
-# answers 200 with banners and carousels and no grid; a search whose query
-# matches nothing ("Oops, produk nggak ditemukan"); and one page past the
-# end of a category listing. All three are EXIT_NO_PRODUCTS — the request
+# On this site this code specifically does NOT cover the ways to get a real
+# page with no vendors on it: a directory rather than a listing (`/city`,
+# `/city/{city}/area`), the site's own 404 document, and one page past the
+# end of a listing. All three are EXIT_NO_PRODUCTS — the request
 # was served exactly as asked and simply has no products on it. Reporting
 # any of them as blocked would send a user hunting for a proxy problem that
 # does not exist.
 #
-# What EXIT_BLOCKED means here is unusually literal: this site refuses a
-# address it has scored NOTHING at all. No status code, no interstitial, no
-# vendor marker — the HTTP/2 stream is reset and the run sees a connection
-# error rather than a page.
+# What EXIT_BLOCKED means here: a refusal with nothing solvable on it —
+# PerimeterX's widget-less denial stub, or the HTTP 403 a headless browser
+# gets (see page_flow and the README). A refusal that DOES carry a widget is
+# a "challenge" and is solved rather than reported.
 EXIT_BLOCKED = 3
 
 # Exit code for a run that gathered SOME rows and then stopped early — a
@@ -438,7 +437,7 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
     }
     if extra:
         # Merged rather than nested under a key, so a consumer reads
-        # `shop_rating` at the top level beside `products`. Run fields win a
+        # `pages_still_growing` at the top level beside `status`. Run fields win a
         # name collision: a caller cannot accidentally overwrite `status`.
         meta.update({k: v for k, v in extra.items() if k not in meta})
     return meta
