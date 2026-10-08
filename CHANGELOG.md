@@ -15,6 +15,27 @@ or from a half-empty output file.
 
 ### Fixed
 
+- **A challenge that never clears no longer buys a solve per retry.**
+  `SOLVES_PER_PAGE` was enforced on only one of the two
+  `handle_captcha_if_present` calls in a fetch attempt, so with no proxy pool
+  a persistent challenge bought one solve on every block-retry: 6 solver
+  invocations against a limit of 1, reproduced with the solver stubbed. The
+  budget (`page_flow.SolveBudget`) is now spent inside the handler, right
+  before the purchase, shared by both call sites and not reset by a rotation.
+  All three engines.
+- **`--delay` now applies between page 1 and page 2.** The pause sat at the
+  tail of the loop, behind a "more pages remain" test, so it only ran between
+  pages that had both been fetched already and a two-page run never paused.
+  It now runs before every navigation after page 1, and once before the
+  `--concurrency` workers start.
+- **`diff_runs.py` refuses two runs that read different listings.** Both
+  runs could be `complete` with the same country `source` and a different
+  city or area, and the diff then reported the AREA change as vendors
+  appearing and disappearing. The sidecar's `start_url` (host, path, query
+  without `page`) must now agree, and a run that stopped at its own `--pages`
+  limit is refused against a deeper run. `--force` still overrides, and a
+  run with no `start_url` in its sidecar is let through as before.
+
 - **Scraper API: `waitFor` is now sent as a JSON object.** Measured
   2026-09-23 against `scraper.2captcha.com/tasks/sync`: the JSON-encoded
   string this client sent (the form older docs described) is refused with

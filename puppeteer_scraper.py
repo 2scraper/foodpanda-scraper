@@ -467,7 +467,7 @@ def _next_page_candidates(session, page_num: int) -> List[str]:
     return page_flow.next_page_candidates(page.url, hrefs or [])
 
 
-def handle_captcha_if_present(session, args) -> bool:
+def handle_captcha_if_present(session, args, budget) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Same two families, same order, same "detected is not blocking" rule as
@@ -498,6 +498,11 @@ def handle_captcha_if_present(session, args) -> bool:
                    challenge.kind, challenge.source, challenge.sitekey)
     if not args.twocaptcha_key:
         logger.warning("No 2captcha API key, so this challenge cannot be solved.")
+        return False
+    if not budget.spend():
+        logger.warning("Not solving: this page has already bought its "
+                       "%d solve(s) (SOLVES_PER_PAGE), and a rotation does "
+                       "not reset that.", budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -540,7 +545,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Counted across the whole block-retry loop, not per attempt: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -584,7 +589,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             break
 
 
-        if handle_captcha_if_present(session, args):
+        if handle_captcha_if_present(session, args, budget):
             time.sleep(1)
 
         html = _content(session) or ""
@@ -627,10 +632,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # refusal is per-session and a fresh browser clears it for nothing.
         # Bounded by SOLVES_PER_PAGE so a page that keeps coming back as a
         # challenge cannot buy one solve per rotation.
-        if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+        if page_flow.should_solve(state):
+            if handle_captcha_if_present(session, args, budget):
                 time.sleep(1)
                 html = _content(session) or html
                 state = page_flow.classify(html, url=page.url)
@@ -964,6 +967,11 @@ def scrape(args) -> int:
                    (first_candidates[0] if first_candidates
                     else page_url(session.page.url, 2)))
             for page_num in range(2, args.pages + 1):
+                # One delay before EVERY navigation after page 1, the 1->2 step
+                # included: it used to sit at the loop's tail, so it only ran
+                # between pages that were both already fetched and a two-page
+                # run never paused at all.
+                time.sleep(args.delay)
                 if pool and pool.rotates_per_page():
                     pool.advance(f"per-page rotation, page {page_num}")
                     session.relaunch()
@@ -992,7 +1000,6 @@ def scrape(args) -> int:
                     url = (planned[page_num - 1] if planned else
                            (nxt[0] if nxt
                             else page_url(session.page.url, page_num + 1)))
-                    time.sleep(args.delay)
     finally:
         if session is not None:
             session.close()

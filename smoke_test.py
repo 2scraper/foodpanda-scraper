@@ -2220,6 +2220,182 @@ def test_no_engine_branches_on_a_mode_that_does_not_exist():
     return ok
 
 
+# ---------------------------------------------------------------------------
+def _engine_tree(name):
+    path = os.path.join(REPO_ROOT, f"{name}.py")
+    return ast.parse(open(path, encoding="utf-8").read())
+
+
+def _is_delay_stmt(stmt):
+    return (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+            and "sleep" in ast.dump(stmt.value.func)
+            and "delay" in ast.dump(stmt.value))
+
+
+def _fetches_a_page(stmt):
+    return any(isinstance(n, ast.Call)
+               and getattr(n.func, "id", "") == "_fetch_one_page"
+               for n in ast.walk(stmt))
+
+
+def test_audit_budget_delay_scope(skips):
+    group("Solve budget, the 1->2 pause, and the diff scope (audit 2026-10-08)")
+    ok = True
+
+    budget = page_flow.SolveBudget()
+    first, second = budget.spend(), budget.spend()
+    ok &= check("a SolveBudget allows SOLVES_PER_PAGE purchases and refuses the next",
+                first is True and second is False
+                and page_flow.SOLVES_PER_PAGE == 1)
+
+    for name in ENGINES:
+        tree = _engine_tree(name)
+        handler = next((n for n in ast.walk(tree)
+                        if isinstance(n, ast.FunctionDef)
+                        and n.name == "handle_captcha_if_present"), None)
+        params = [a.arg for a in handler.args.args] if handler else []
+        ok &= check(f"{name}: the handler takes a budget", "budget" in params)
+        # The budget must be asked where the money is spent: the spend()
+        # call has to come BEFORE solve_recaptcha in the handler's own body.
+        spend_at = min((n.lineno for n in ast.walk(handler)
+                        if isinstance(n, ast.Call)
+                        and isinstance(n.func, ast.Attribute)
+                        and n.func.attr == "spend"), default=None) if handler else None
+        solve_at = min((n.lineno for n in ast.walk(handler)
+                        if isinstance(n, ast.Call)
+                        and getattr(n.func, "id", "") == "solve_recaptcha"),
+                       default=None) if handler else None
+        ok &= check(f"{name}: budget.spend() precedes solve_recaptcha",
+                    spend_at is not None and solve_at is not None
+                    and spend_at < solve_at)
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", "") == "handle_captcha_if_present"]
+        ok &= check(f"{name}: both call sites pass a budget ({len(calls)} found)",
+                    len(calls) == 2 and all(len(c.args) == 3 for c in calls))
+
+        # The pause: a time.sleep(args.delay) in the loop that fetches pages
+        # 2..N, before the fetch itself and not after it.
+        loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)
+                 and isinstance(n.iter, ast.Call)
+                 and getattr(n.iter.func, "id", "") == "range"
+                 and n.iter.args and isinstance(n.iter.args[0], ast.Constant)
+                 and n.iter.args[0].value == 2
+                 and "page_num" in ast.dump(n.target)]
+        good = False
+        if len(loops) == 1:
+            body = loops[0].body
+            d = next((i for i, st in enumerate(body) if _is_delay_stmt(st)), None)
+            f = next((i for i, st in enumerate(body) if _fetches_a_page(st)), None)
+            good = d is not None and f is not None and d < f
+        ok &= check(f"{name}: the delay runs before page 2's navigation", good)
+
+    # Behaviour, with the driver stubbed: the real fetch loop and the real
+    # handler, a solver that never clears the challenge, no pool.
+    try:
+        import playwright_scraper as engine
+    except ImportError as exc:
+        skips.append(f"playwright_scraper (solve budget): {exc}")
+        engine = None
+
+    if engine is not None:
+        import argparse
+        import time as _time
+        import types
+        spent = {"n": 0}
+        ch = types.SimpleNamespace(kind="recaptcha", source="stub", sitekey="k",
+                                   action=None, is_turnstile=False,
+                                   solved_user_agent=None)
+
+        class _Page:
+            url = "https://www.foodpanda.pk/city/lahore"
+            def goto(self, *a, **k): pass
+            def reload(self, *a, **k): pass
+            def wait_for_timeout(self, ms): pass
+            def query_selector_all(self, sel): return []
+            def evaluate(self, js, *a): return None
+
+        class _Session:
+            page = _Page()
+            pool = None
+            def relaunch(self): pass
+
+        saved = {k: getattr(engine, k) for k in (
+            "solve_recaptcha", "detect_recaptcha_v3",
+            "detect_recaptcha_in_page", "reconcile_detections",
+            "_content_when_settled", "_classify")}
+        real_sleep = _time.sleep
+        try:
+            engine.solve_recaptcha = (
+                lambda *a, **k: spent.__setitem__("n", spent["n"] + 1) or "tok")
+            engine.detect_recaptcha_v3 = lambda *a, **k: ch
+            engine.detect_recaptcha_in_page = lambda *a, **k: ch
+            engine.reconcile_detections = lambda a, b: ch
+            engine._content_when_settled = lambda page: "<html>denied</html>"
+            engine._classify = lambda page, html: "challenge"
+            _time.sleep = lambda s: None
+            args = argparse.Namespace(
+                solve_captcha="when-blocked", twocaptcha_key="K" * 32,
+                captcha_api="v2", min_score=0.3, pages=1, mode="listing",
+                retries=1, retry_delay=0, proxy_block_retries=3,
+                cdp_endpoint=None, dump_html=None, url=_Page.url, delay=0)
+            with contextlib.redirect_stdout(io.StringIO()):
+                engine._fetch_one_page(_Session(), args, None, 1, args.url)
+        finally:
+            _time.sleep = real_sleep
+            for k, v in saved.items():
+                setattr(engine, k, v)
+        ok &= check("a challenge that never clears buys SOLVES_PER_PAGE solves "
+                    f"across every block-retry (bought {spent['n']})",
+                    spent["n"] == page_flow.SOLVES_PER_PAGE)
+
+    # --- the diff scope guard
+    import argparse as _ap
+    import diff_runs
+
+    def sidecar(tmp, name, **meta):
+        base = {"status": "complete", "mode": "listing",
+                "stop_reason": "completed", "pages_requested": 2,
+                "pages_completed": 2,
+                "start_url": "https://www.foodpanda.pk/city/lahore/area/gulberg"}
+        base.update(meta)
+        base = {k: v for k, v in base.items() if v is not None}
+        path = os.path.join(tmp, name + ".json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([], f)
+        with open(os.path.join(tmp, name + ".meta.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(base, f)
+        return path
+
+    def refused(tmp, **new_meta):
+        old = sidecar(tmp, "old")
+        new = sidecar(tmp, "new", **new_meta)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return not diff_runs._check_comparable(
+                _ap.Namespace(old=old, new=new, force=False))
+
+    gulberg = "https://www.foodpanda.pk/city/lahore/area/gulberg"
+    with tempfile.TemporaryDirectory() as tmp:
+        ok &= check("the same listing at the same depth is comparable",
+                    not refused(tmp))
+        ok &= check("a different area of the same country is refused",
+                    refused(tmp, start_url="https://www.foodpanda.pk/city/lahore/area/defence"))
+        ok &= check("a different city is refused",
+                    refused(tmp, start_url="https://www.foodpanda.pk/city/karachi"))
+        ok &= check("www, a trailing slash and ?page= are not a different scope",
+                    not refused(tmp, start_url="https://foodpanda.pk/city/lahore/area/gulberg/?page=2"))
+        ok &= check("a different filter in the query is a different scope",
+                    refused(tmp, start_url=gulberg + "?cuisine=pizza"))
+        ok &= check("a run capped at --pages against a deeper run is refused",
+                    refused(tmp, pages_completed=1, pages_requested=1))
+        ok &= check("a shallower run that reached the END of its listing is comparable",
+                    not refused(tmp, pages_completed=1, pages_requested=5,
+                                stop_reason="no_new_products"))
+        ok &= check("a sidecar with no start_url has no scope to compare",
+                    not refused(tmp, start_url=None))
+    return ok
+
+
 def main() -> int:
     ok = True
     skips = []
@@ -2245,6 +2421,7 @@ def main() -> int:
     ok &= test_proxy_pool_and_credentials()
     ok &= test_engine_parity(skips)
     ok &= test_concurrency_machinery(skips)
+    ok &= test_audit_budget_delay_scope(skips)
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()
     ok &= test_wording()
