@@ -658,7 +658,7 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     return None
 
 
-def handle_captcha_if_present(page, args) -> bool:
+def handle_captcha_if_present(page, args, budget) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page — not scoped to one URL. The
@@ -746,6 +746,11 @@ def handle_captcha_if_present(page, args) -> bool:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page already "
                        "holds.")
+        return False
+    if not budget.spend():
+        logger.warning("Not solving: this page has already bought its "
+                       "%d solve(s) (SOLVES_PER_PAGE), and a rotation does "
+                       "not reset that.", budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -839,7 +844,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Counted across the whole block-retry loop, not per attempt: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -881,7 +886,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if load_failed:
             break
 
-        if handle_captcha_if_present(session.page, args):
+        if handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
             # before judging what came back.
             session.page.wait_for_timeout(1000)
@@ -930,10 +935,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # refusal is per-session and a fresh browser clears it for nothing.
         # Bounded by SOLVES_PER_PAGE so a page that keeps coming back as a
         # challenge cannot buy one solve per rotation.
-        if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session.page, args):
+        if page_flow.should_solve(state):
+            if handle_captcha_if_present(session.page, args, budget):
                 session.page.wait_for_timeout(1000)
                 html = _content_when_settled(session.page) or html
                 state = _classify(session.page, html)
@@ -1423,6 +1426,9 @@ def scrape(args) -> int:
                     # done its job, and holding it open would cost one more
                     # browser than asked for.
                     session.close()
+                    # Workers leave from the exit page 1 just used; the delay
+                    # that separates page 1 from page 2 applies to them too.
+                    time.sleep(args.delay)
                     specs = [(n, planned[n - 2]) for n in range(2, args.pages + 1)]
                     logger.info("Fetching pages 2-%d across %d workers%s.",
                                 args.pages, concurrency,
@@ -1448,6 +1454,11 @@ def scrape(args) -> int:
                     url = (planned[0] if planned else
                            _next_url_from_page(session.page, args, 1))
                     for page_num in range(2, args.pages + 1):
+                        # One delay before EVERY navigation after page 1, the 1->2 step
+                        # included: it used to sit at the loop's tail, so it only ran
+                        # between pages that were both already fetched and a two-page
+                        # run never paused at all.
+                        time.sleep(args.delay)
                         # A new exit per page is what actually spreads a run's
                         # volume, and it costs a browser relaunch: carrying the
                         # session across exits would defeat the point.
@@ -1489,7 +1500,6 @@ def scrape(args) -> int:
                         if page_num < args.pages:
                             url = (planned[page_num - 1] if planned else
                                    _next_url_from_page(session.page, args, page_num))
-                            time.sleep(args.delay)
         finally:
             if session is not None:
                 session.close()

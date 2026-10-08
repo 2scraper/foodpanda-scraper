@@ -50,6 +50,7 @@ import json
 import pathlib
 import re
 import sys
+from urllib.parse import parse_qsl, urlsplit
 from typing import Dict, List, Optional, Tuple
 
 from output_writer import UNIQUE_BY_SKU_MODES
@@ -300,6 +301,69 @@ def _run_status(path: str) -> Tuple[Optional[str], Optional[dict]]:
     return meta.get("status"), meta
 
 
+def _scope(start_url: Optional[str]):
+    """(host, path, other query) of a run's start URL, or None if unknown.
+
+    The listing a run read: country site, city/area path, and any filter in
+    the query. `page` is dropped, because a run started on `?page=2` reads
+    the same listing as one started on page 1.
+    """
+    if not start_url:
+        return None
+    parts = urlsplit(start_url)
+    host = parts.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    query = tuple(sorted((k.lower(), v) for k, v in
+                         parse_qsl(parts.query, keep_blank_values=True)
+                         if k.lower() != "page"))
+    return host, parts.path.rstrip("/").lower(), query
+
+
+def _scope_problems(args) -> List[str]:
+    """Reasons the two runs did not read the same slice of the site.
+
+    `source` only says which COUNTRY a run came from. Two complete runs of
+    Gulberg and of Defence in the same country are both `complete`, share
+    that source, and would diff as hundreds of vendors appearing and
+    disappearing. The sidecar's `start_url` says which listing was read, and
+    `pages_completed` plus a stop reason of `completed` (the run stopped at
+    --pages, not at the end of the listing) say how deep.
+
+    A run with no sidecar, or one written before `start_url` existed, has no
+    scope to compare and is let through, as `_run_status` already does.
+    """
+    metas = {}
+    for label, path in (("--old", args.old), ("--new", args.new)):
+        _, meta = _run_status(path)
+        if meta:
+            metas[label] = meta
+    problems = []
+    scopes = {label: _scope(m.get("start_url")) for label, m in metas.items()}
+    known = {label: sc for label, sc in scopes.items() if sc}
+    if len(known) == 2 and known["--old"] != known["--new"]:
+        problems.append(
+            f"the two runs read different listings ({metas['--old'].get('start_url')!r} "
+            f"vs {metas['--new'].get('start_url')!r}). Two selections of one "
+            f"country site share `source` and can both be complete, but "
+            f"comparing them reports the difference between the AREAS as "
+            f"vendors appearing and disappearing.")
+    if len(metas) == 2:
+        depth = {label: m.get("pages_completed") for label, m in metas.items()}
+        shallow = [label for label, m in metas.items()
+                   if m.get("stop_reason") == "completed"
+                   and isinstance(depth[label], int)
+                   and isinstance(depth["--new" if label == "--old" else "--old"], int)
+                   and depth[label] < depth["--new" if label == "--old" else "--old"]]
+        if shallow:
+            problems.append(
+                f"the two runs are different depths ({depth}), and "
+                f"{shallow[0]} stopped at its --pages limit rather than at "
+                f"the end of the listing, so the deeper run's extra vendors "
+                f"would read as added.")
+    return problems
+
+
 def _check_comparable(args) -> bool:
     """Refuse an assortment diff between runs that are not both complete.
 
@@ -335,6 +399,7 @@ def _check_comparable(args) -> bool:
                 f"{label} ({path}) was a {status!r} run — stopped after "
                 f"{meta.get('pages_completed')} of {meta.get('pages_requested')} "
                 f"page(s), reason {meta.get('stop_reason')!r}")
+    problems.extend(_scope_problems(args))
     if len(set(modes.values())) > 1:
         problems.append(
             f"the two runs are different modes ({modes}). A listing row and a "

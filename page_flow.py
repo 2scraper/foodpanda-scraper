@@ -352,6 +352,31 @@ BLOCK_RETRIES_WITH_POOL = 5
 SOLVES_PER_PAGE = 1
 
 
+class SolveBudget:
+    """How many solves one page may still buy, shared by EVERY call site.
+
+    `handle_captcha_if_present` runs twice per attempt (before the page is
+    classified, and again for a page the policy says is gated), and only the
+    second was ever counted: with no proxy pool a persistent challenge bought
+    one solve per block-retry, 6 against a limit of 1 on a stubbed solver.
+    So the check sits where the money is spent, not where the call is made.
+
+    `spend()` is asked BEFORE each purchase and is never reset by a
+    rotation: a fresh exit is a reason to re-fetch, not a fresh allowance.
+    A solver that raises still spent it, since a refused task can be billed.
+    """
+
+    def __init__(self, limit: Optional[int] = None):
+        self.limit = SOLVES_PER_PAGE if limit is None else limit
+        self.spent = 0
+
+    def spend(self) -> bool:
+        if self.spent >= self.limit:
+            return False
+        self.spent += 1
+        return True
+
+
 def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     """What a reader should actually DO about this block.
 
