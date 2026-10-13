@@ -1119,7 +1119,7 @@ def parse_args():
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Accepted for flag parity and IGNORED here: parallel "
                         "page fetching lives in playwright_scraper.py.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3), "
                         "each with a FRESH browser — which is what actually "
                         "clears a refusal on this site: 10 of 30 measured "
