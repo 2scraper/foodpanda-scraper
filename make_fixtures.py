@@ -19,7 +19,7 @@ headless window far more often than a headful one, so pass `--headful`.
 
 WHAT IT ENFORCES, and why each rule is here
 -------------------------------------------
-  * every fixture is CUT from a real capture, never hand-written. §18's
+  * every fixture is CUT from a real capture, never hand-written. The
     lesson in this repo's shape: the one marker set in this family that WAS
     written from imagination matched none of the real strings, and an empty
     page came back as `shell` and spent a 25-second readiness wait on an
@@ -32,7 +32,7 @@ WHAT IT ENFORCES, and why each rule is here
     is caught too. That key is PerimeterX's own public one rather than
     anybody's secret, but a 40-character base64-ish string in a public repo
     reads as a live credential to every scanner that looks, including this
-    repo's own CI grep (§10).
+    repo's own CI grep.
 """
 import json
 import os
@@ -55,7 +55,7 @@ OUT = HERE / "fixtures_generated.json"
 
 # name -> (capture file, the URL it was fetched from, how many tiles to keep)
 #
-# Four listing fixtures and not one, because §15's "run a SECOND country
+# Four listing fixtures and not one, because the family's "run a SECOND country
 # site" applies to fixtures too: every bug this repo found that a single
 # locale could not show came from comparing two. `pk` and `sg` differ in
 # language, currency inside a deal label ("Rs. 300" against "S$ 15") and in
@@ -80,7 +80,7 @@ SOURCES = {
 }
 
 # A page the site serves that holds NO vendor tiles: the /city directory. It
-# is the case §17's classification-order trap is about — built out of the
+# is the case the family's classification-order trap is about — built out of the
 # site's own assets, so a threshold-first classifier calls it blocked.
 INDEX_SOURCES = {
     "INDEX_PK_CITY": ("fp_pk_city_index.html", "https://www.foodpanda.pk/city"),
@@ -113,7 +113,7 @@ SCROLLED_SOURCE = ("fp_pk_area_gulberg_scrolled.html",
                    "https://www.foodpanda.pk/city/lahore/area/gulberg")
 
 # The site key PerimeterX's denial page renders. Scrubbed by PATTERN, so a
-# future capture with a different key is caught too (§10).
+# future capture with a different key is caught too.
 _SITEKEY_RE = re.compile(r'(data-sitekey=")[^"]{20,}(")')
 _SITEKEY_PLACEHOLDER = r"\1SITEKEY-SCRUBBED-BY-make_fixtures\2"
 # PerimeterX stamps a per-request uuid/vid into its denial document. Neither
@@ -167,7 +167,7 @@ def trim_tiles(html: str, keep: int) -> str:
             + _evidence_scripts(html) + "</body></html>")
 
 
-# The two strings §18 is about, both of which live in the BODY after the grid
+# The two strings a family rule is about, both of which live in the BODY after the grid
 # and would otherwise be trimmed away:
 #
 #   window._pxAppId = 'PX…'        the PerimeterX sensor bootstrap
@@ -182,7 +182,7 @@ _EVIDENCE_MARKERS = ("window._pxAppId", "PERIMETERX_APP_ID",
 
 
 def _evidence_scripts(html: str) -> str:
-    """The script tags carrying §18's evidence, verbatim, or "" if absent."""
+    """The script tags carrying the family's evidence, verbatim, or "" if absent."""
     out = []
     for marker in _EVIDENCE_MARKERS:
         at = html.find(marker)
@@ -208,7 +208,7 @@ def _evidence_scripts(html: str) -> str:
 # not evidence about anything.
 _KEEP_IN_SCRIPT = (
     "application/ld+json",     # jsonld_vendor_names reads these
-    "_pxAppId",                # the §18 trap: on EVERY served page
+    "_pxAppId",                # the trap: on EVERY served page
     "PERIMETERX_APP_ID",
     "Captcha_Modal_Warning",   # the i18n bundle's reCAPTCHA strings, ditto
     "images.deliveryhero.io",  # the positive asset signal
@@ -341,7 +341,7 @@ def main() -> int:
         failures += 1
 
     # A last, cheap guard: nothing that looks like a live credential may
-    # reach the file (§10). Checked on the SERIALISED output rather than per
+    # reach the file. Checked on the SERIALISED output rather than per
     # fixture, so a key hiding in a field this script did not scrub is caught
     # too.
     blob = json.dumps(fixtures, ensure_ascii=False)

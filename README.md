@@ -118,12 +118,11 @@ Both runs took the same three pages of the same listing and returned 143 and
 144 vendors with `status: complete`. If you are doing more than a page or
 two, that is the difference the money buys.
 
-> **The endpoint expires.** A Scraping Browser profile lives about a day;
-> after that it answers HTTP 401 `deny_no_user` and you mint new credentials.
-> So it is the best path for a run you are watching and the wrong thing to
-> put in anything scheduled. This repo runs nothing live on a timer, so it
-> is not a problem here — but if you wire one up yourself, use a proxy for
-> the schedule and keep the endpoint for runs you are watching.
+> **The endpoint expires.** How long a Scraping Browser profile lives is not
+> a fixed figure — one endpoint set as a repository secret was still accepted
+> ten days later — but once it is gone it answers HTTP 401 `deny_no_user` and
+> you mint new credentials. If you put one in a scheduled job, expect to
+> refresh it when that 401 appears.
 
 **What a 2Captcha key buys here**: a way past both of this site's
 refusals, measured. PerimeterX's denial renders reCAPTCHA **Enterprise**
@@ -497,7 +496,7 @@ Every one of these is also settable from `.env`; see
 | `--fingerprint` | off | [Makes this site worse — do not use it here](#--fingerprint-makes-this-site-worse--do-not-use-it-here) |
 | `--fp-tags TAG` | `Windows` | **One** OS-family tag. `Chrome`, `Desktop` and `Mobile` are each rejected by the API with HTTP 400 |
 | `--fp-country CC` | — | Match it to your exit's country; a US fingerprint on a German address is a contradiction |
-| `--cdp-endpoint WS` | — | Drive a remote browser (the Scraping Browser API) instead of a local one. `--proxy` and `--headless/--headful` are ignored with it, and [the endpoint expires in about a day](#do-i-need-to-buy-anything) |
+| `--cdp-endpoint WS` | — | Drive a remote browser (the Scraping Browser API) instead of a local one. `--proxy` and `--headless/--headful` are ignored with it, and [its credentials expire](#do-i-need-to-buy-anything) |
 
 ---
 
@@ -588,9 +587,10 @@ There is also a **canary** workflow that takes three real pages off the live
 site and asserts the things only a real run can show — that pagination
 happened, that `(page, position)` is unique, that an area row carries no
 delivery data. It is **dispatch-only, with no schedule**: nothing here runs
-live on its own, and there is no badge claiming it does. Point it at a
+live on its own, and the `canary` badge shows the last dispatch. Point it at a
 `FOODPANDA_CDP_ENDPOINT` or `FOODPANDA_PROXY` secret and run it by hand when
-you want that check; without one it skips with a notice.
+you want that check. Without one it fails with an error naming the missing
+secret, because a run that never reached the site has tested nothing.
 
 ---
 

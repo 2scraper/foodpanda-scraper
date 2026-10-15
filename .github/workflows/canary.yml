@@ -6,7 +6,7 @@ name: canary
 # throughout. This workflow is the other half: a real run against a real
 # listing URL, so a site-side break is caught here first.
 #
-# THIS CANARY NEEDS A PAID EXIT, AND SKIPS WITHOUT ONE
+# THIS CANARY NEEDS A PAID EXIT, AND FAILS WITHOUT ONE
 # -----------------------------------------------------
 # foodpanda is fronted by PerimeterX, and the refusal is a matter of degree
 # rather than of policy: measured 2026-09-15 from a RESIDENTIAL address with
@@ -23,16 +23,16 @@ name: canary
 #     unproxied residential   page 3 refused 4 times, 5 attempts, ~7 minutes
 #     --cdp-endpoint          zero refusals, zero retries, 29 seconds
 #
-# Since this only ever runs when someone asks it to, the endpoint's short life
-# is not the problem it would be on a schedule — but know about it anyway:
-# **a Scraping Browser profile lives about a day**, after which it answers
-# HTTP 401 `deny_no_user`.
+# A Scraping Browser profile's credentials expire. How long they last is not
+# a fixed figure (an endpoint set as a repository secret was still accepted
+# ten days later); an expired one answers HTTP 401 `deny_no_user`.
 #
-#     gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper  # fastest, expires daily
+#     gh secret set FOODPANDA_CDP_ENDPOINT --repo 2scraper/foodpanda-scraper  # fastest; credentials expire
 #     gh secret set FOODPANDA_PROXY        --repo 2scraper/foodpanda-scraper  # durable
 #
-# Both are accepted. An expired endpoint is reported as a SKIP with its cause
-# named, not as a failure.
+# Both are accepted. With NEITHER set the job FAILS with an error naming
+# them: a canary that did not reach the site has tested nothing, and a green
+# badge over a run that never happened says the opposite.
 #
 # Whatever you set, CHECK IT CAN DRIVE A BROWSER before trusting the result.
 # A
@@ -40,22 +40,14 @@ name: canary
 # CONNECT will hang every page load at Chromium's own 30s budget, to every
 # destination, while `curl` through the same credential works perfectly. See
 # TROUBLESHOOTING.md.
-#
-# A check that is always red teaches everyone to ignore checks, which is
-# worse than having no check at all. So the live steps are guarded on a
-# secret being present and the job goes GREEN with a `::notice::` explaining
-# itself when neither is — §11's rule.
 
 # ON DEMAND ONLY — there is deliberately no `schedule:` here.
 #
-# This repo's maintainer does not run live checks from CI. With a cron in
-# place the job would fire every morning, take its SKIP branch and go green,
-# and the README would carry a `canary` badge advertising a daily site-side
-# check that never happens. A badge that cannot be read is worse than no
-# badge, which is the same reason §11 refuses a check that is always red.
-#
-# Every assertion below is intact. Set a secret, dispatch it, and it does
-# real work; leave it alone and it costs nothing and promises nothing.
+# A GitHub runner's datacentre address cannot reach this site without a paid
+# exit, so a schedule is only worth adding once a secret is configured.
+# Dispatched without one, the run is RED and says which secret is missing;
+# every outcome that did not test real rows (blocked, never reached the
+# site, zero rows) is red too.
 on:
   workflow_dispatch:
 
@@ -73,27 +65,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Explain the skip
+      - name: Fail when no paid exit is configured
         if: env.HAVE_EXIT != 'true'
         run: |
-          set -e
-          echo "::notice::Neither FOODPANDA_CDP_ENDPOINT nor FOODPANDA_PROXY is set, so the live canary was skipped rather than run and failed. foodpanda refuses a large share of cold navigations even from a residential address (10 of 30 served, measured 2026-09-15), and a runner's datacentre address is worse. Set a secret to make this canary real."
+          echo "::error::Missing secret: neither FOODPANDA_PROXY nor FOODPANDA_CDP_ENDPOINT is set, so the live canary could not reach foodpanda and tested NOTHING. foodpanda refuses a large share of cold navigations even from a residential address (10 of 30 served, measured 2026-09-15), and a runner's datacentre address is worse. Set one of the two secrets."
           {
-            echo "### Canary SKIPPED — no paid exit configured"
+            echo "### Canary FAILED — no paid exit configured"
             echo
-            echo "The live run did not happen. Nothing about the site or the parser was tested today."
+            echo "The live run did not happen. Nothing about the site or the parser was tested."
             echo
             echo 'Turn it on with a residential proxy, which is the DURABLE secret:'
             echo '```'
             echo 'gh secret set FOODPANDA_PROXY --repo 2scraper/foodpanda-scraper'
             echo '```'
-            echo 'A `FOODPANDA_CDP_ENDPOINT` is accepted too and is the faster path, but a'
-            echo 'Scraping Browser profile expires in about a day — so it suits a manual'
-            echo 'dispatch rather than this daily schedule.'
+            echo 'A `FOODPANDA_CDP_ENDPOINT` is accepted too and is the faster path. Its'
+            echo 'credentials expire (an expired one answers HTTP 401 deny_no_user), so'
+            echo 'refresh the secret when a dispatch reports that.'
             echo
             echo 'Check whatever you set can drive a browser: see TROUBLESHOOTING.md on the'
             echo '407 handshake.'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - uses: actions/setup-python@v5
         if: env.HAVE_EXIT == 'true'
@@ -116,7 +108,7 @@ jobs:
         if: env.HAVE_EXIT == 'true'
         id: run
         # --pages 3, not 1: with one page pagination is never exercised, and
-        # that is exactly how a silent-single-page bug survives (§11). This
+        # that is exactly how a silent-single-page bug survives. This
         # listing has 24 numbered pages, so three is comfortably inside it.
         #
         # --delay 25 --retry-delay 25, chosen for the PROXY, which is the
@@ -164,22 +156,17 @@ jobs:
               echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. That is no longer just an access condition. Read the debug dump: it names PerimeterX or Cloudflare, and those mean different things. If a proxy is configured rather than the Scraping Browser, check it can drive a browser at all — see TROUBLESHOOTING.md on the 407 handshake."
               exit 1 ;;
             6)
-              tested=false
-              echo "::warning::Partial run (exit 6) — some pages were refused and the sidecar says which. On this site that is the normal failure mode under load rather than a defect, so the badge is not failed; if it repeats every day, raise --delay or spread the run across more exits."
+              # Rows WERE gathered, so the data checks below still run on
+              # them and decide: a partial run that still clears the row
+              # floor and every field floor has tested the parser.
+              echo "::warning::Partial run (exit 6) — some pages were refused and the sidecar says which. The data checks below decide whether what was gathered is enough."
               {
                 echo "### Canary tested only PART of the run (exit 6)"
                 echo "See \`pages_failed\` and \`stop_reason\` in the sidecar artefact."
               } >> "$GITHUB_STEP_SUMMARY" ;;
             5)
-              tested=false
-              echo "::warning::Remote API error (exit 5) — a remote endpoint refused the connection, so nothing was tested. If FOODPANDA_CDP_ENDPOINT is set, the overwhelmingly likely cause is that the Scraping Browser profile EXPIRED: they live about a day and then answer HTTP 401 deny_no_user. That is not a defect and does not fail the badge. Set FOODPANDA_PROXY instead for a scheduled job, or refresh the endpoint."
-              {
-                echo "### Canary did NOT test anything (exit 5)"
-                echo
-                echo 'A remote endpoint refused the connection. If `FOODPANDA_CDP_ENDPOINT` is set,'
-                echo 'the profile has almost certainly expired — they last about a day. Use'
-                echo '`FOODPANDA_PROXY` for a scheduled job; the endpoint suits a manual dispatch.'
-              } >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "::error::The content was never obtained (exit 5), so nothing about the site or the parser was tested. If FOODPANDA_CDP_ENDPOINT is set, check the log for the status: HTTP 401 deny_no_user means the Scraping Browser profile's credentials expired (refresh the secret); HTTP 500 means the profile was busy. With FOODPANDA_PROXY, a timeout on every attempt usually means the proxy cannot drive a browser (see TROUBLESHOOTING.md on the 407 handshake). A served grid that parsed to nothing also ends here, as stop_reason parser_found_nothing."
+              exit 1 ;;
             4)
               echo "::error::Ran fine and parsed 0 rows (exit 4) from a listing that holds 48 per page. The tile anchor (li[class*=bds-c-vendor-tile]) has most likely moved — this is exactly the regression this canary exists to catch. The HTML dump in the artefacts tells you."
               exit 1 ;;
@@ -239,7 +226,7 @@ jobs:
           # THE PAGE/POSITION INVARIANT. `position` restarts at 1 on every
           # page, so this pair is the only thing that identifies a row's place
           # in the listing — and a sibling repo shipped 60 of 119 rows
-          # silently sharing one (§18). One line, and it catches that forever.
+          # silently sharing one. One line, and it catches that forever.
           pairs = [(r.get("page"), r.get("position")) for r in rows]
           if len(set(pairs)) != len(pairs):
               fail.append(f"{len(pairs) - len(set(pairs))} row(s) share a "

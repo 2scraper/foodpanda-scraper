@@ -140,9 +140,17 @@ class PageOutcome:
     # whose grid was still growing when the budget ran out is partial.
     scroll: Optional[dict] = None
 
+    # True when the page was served WITH vendor tiles in it (state
+    # "content") and the parser still produced zero rows. That is a defect in
+    # this repo's reading of the page, not an empty listing, so it fails the
+    # page and the run ends with `parser_found_nothing` (exit 5 holding
+    # nothing, exit 6 holding earlier pages) rather than exit 4.
+    parser_failed: bool = False
+
     @property
     def ok(self) -> bool:
-        return not self.load_failed and self.blocked_by is None
+        return (not self.load_failed and self.blocked_by is None
+                and not self.parser_failed)
 
 
 # Every `scheme://user:pass@` in a string, however many times it occurs.
@@ -376,8 +384,8 @@ def _driver(session):
     def scroll_to_bottom():
         # To the document's own bottom, not a fixed wheel distance: a fixed
         # distance falls behind a page that grows as it loads, and a sibling
-        # repo's 2400px wheel stopped three rounds short of a 7600px grid
-        # (§8). Only the HOME page is ever scrolled here.
+        # repo's 2400px wheel stopped three rounds short of a 7600px grid.
+        # Only the HOME page is ever scrolled here.
         try:
             driver.execute_script(
                 "window.scrollTo(0, document.body.scrollHeight);")
@@ -576,7 +584,12 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             time.sleep(1)
 
         html = d["content"]() or ""
-        state = page_flow.classify(html, url=d["current_url"]())
+        # No status here, and not by omission: `driver.get()` returns None and
+        # WebDriver exposes no HTTP status at all. Selenium therefore judges a
+        # page by its body alone (tiles, the site's 404 copy, a vendor
+        # refusal, the site's own assets); the two other engines also pass
+        # the status of the navigation.
+        state = page_flow.classify(html, None, url=d["current_url"]())
 
         # "Not painted yet" is not a fault. A page foodpanda served with no
         # grid in it yet is a SHELL — classified naively that is "unknown",
@@ -597,7 +610,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 logger.info("The grid still had not painted after %.0fs "
                             "(%d match(es)).", wait_s, found)
             html = d["content"]() or html
-            state = page_flow.classify(html, url=d["current_url"]())
+            state = page_flow.classify(html, None, url=d["current_url"]())
 
         # No interstitial-settling step, and the reason is that foodpanda's
         # refusal does not settle into anything: PerimeterX's denial document
@@ -619,7 +632,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             if handle_captcha_if_present(session, args, budget):
                 time.sleep(1)
                 html = d["content"]() or html
-                state = page_flow.classify(html, url=d["current_url"]())
+                state = page_flow.classify(html, None, url=d["current_url"]())
                 if state == "content":
                     logger.info("The solve was accepted — page %d is content "
                                 "now.", page_num)
@@ -667,7 +680,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             # every time, while the run that succeeded used a 30-second base
             # delay and was served on its fifth attempt. The Playwright
             # engine has always waited here; these two did not, which is the
-            # kind of disagreement §1 says three engines must not have.
+            # kind of disagreement a family rule says three engines must not have.
             pause = args.retry_delay * (block_attempt + 1)
             logger.info("Waiting %.1fs before the next attempt — on this "
                         "site the pause is half of what makes a retry work.",
@@ -746,7 +759,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # same way. This engine could use WebDriverWait — it never evaluates
         # a string — but a shared wait is one fewer thing to drift on, and
         # the other two cannot — a CSP without `unsafe-eval` refuses an
-        # evaluated string outright (§18).
+        # evaluated string outright.
         found = page_flow.wait_for_count(d["count"], d["sleep"], selector,
                                          threshold,
                                          int(timeout_s * 1000))
@@ -865,6 +878,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                     "the schema.", page_num, closed, total)
 
     if not products:
+        if state == "content":
+            # The page held vendor tiles (that is what "content" means) and
+            # the parse returned none: the tile markup moved and the parser
+            # did not follow. Not an empty listing — fail the page so the
+            # run cannot report it as exit 4 or as complete.
+            outcome.parser_failed = True
+            logger.error("Page %d was served WITH vendor tiles in it and "
+                         "parsed to 0 rows — a parser failure, not an empty "
+                         "listing. Reporting the page as failed "
+                         "(parser_found_nothing).", page_num)
         debug_html = f"{args.out}_page{page_num}_debug.html"
         with open(debug_html, "w", encoding="utf-8") as f:
             f.write(html)
@@ -910,8 +933,7 @@ def scrape(args) -> int:
         outcomes.append(first)
 
         if not first.ok:
-            stop_reason = ("page_load_timeout" if first.load_failed
-                           else f"blocked_{first.blocked_by}")
+            stop_reason = page_flow.failure_stop_reason(first)
             blocked = first.blocked_by is not None
         elif args.mode == "listing":
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
@@ -956,8 +978,7 @@ def scrape(args) -> int:
                 outcome = _fetch_one_page(session, args, pool, page_num, url)
                 outcomes.append(outcome)
                 if not outcome.ok:
-                    stop_reason = ("page_load_timeout" if outcome.load_failed
-                                   else f"blocked_{outcome.blocked_by}")
+                    stop_reason = page_flow.failure_stop_reason(outcome)
                     blocked = outcome.blocked_by is not None
                     break
 
@@ -1090,9 +1111,9 @@ def parse_args():
                         "`run_label`. It deliberately does NOT write to the "
                         "`category` column, which holds the vendor's own "
                         "cuisines.")
-    p.add_argument("--pages", type=int, default=1, help="Listing pages to crawl")
-    p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--pages", type=page_flow.pages_arg, default=1, help="Listing pages to crawl")
+    p.add_argument("--delay", type=page_flow.delay_arg, default=2.0, help="Delay between pages, seconds")
+    p.add_argument("--concurrency", type=page_flow.concurrency_arg, default=1, metavar="N",
                    help="Accepted for flag parity and IGNORED here: parallel "
                         "page fetching lives in playwright_scraper.py.")
     p.add_argument("--retries", type=page_flow.attempts, default=3,
@@ -1103,7 +1124,7 @@ def parse_args():
                         "numbers. A page that comes back EMPTY is not "
                         "retried: an address that does not exist is a correct "
                         "answer, not a fault.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_arg, default=2.0,
                    help="Seconds before the first retry, doubling thereafter")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="foodpanda_vendors", help="Output file prefix")
@@ -1117,7 +1138,7 @@ def parse_args():
                         "Wins over --proxy.")
     p.add_argument("--proxy-rotate", choices=list(ROTATE_MODES), default="per-run")
     p.add_argument("--proxy-shuffle", action="store_true")
-    p.add_argument("--proxy-block-retries", type=int, default=2)
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2)
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 rows were found.")
@@ -1195,7 +1216,7 @@ def parse_args():
     # listing. `unsupported_reason` also covers the two cases where the URL
     # genuinely IS foodpanda and is still refused (the global landing page,
     # and a vendor page), because "is not a foodpanda site" would be false
-    # and would send the reader hunting for a typo (§5).
+    # and would send the reader hunting for a typo.
     why = unsupported_reason(args.url)
     if why:
         p.error(why + ".")
@@ -1217,7 +1238,7 @@ def parse_args():
         # Measured on this site, four runs of one URL within five minutes:
         # no fingerprint was served 48 rows on the first attempt twice, while
         # --fp-country pk AND --fp-country de (matching the exit) were each
-        # refused 4 of 4. So it is not the country mismatch §8 warns about —
+        # refused 4 of 4. So it is not the country mismatch a family rule warns about —
         # it is that an injected Windows identity contradicts the real
         # browser underneath it, and PerimeterX reads that as worse than an
         # honest browser.

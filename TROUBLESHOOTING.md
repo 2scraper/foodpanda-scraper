@@ -358,8 +358,9 @@ necessary but not sufficient here — the `407` problem above is separate.)
 
 ## `--cdp-endpoint` worked yesterday and fails today
 
-Expected. **A Scraping Browser profile lives about a day.** When it is gone
-the endpoint answers HTTP 401 `deny_no_user`, the run exits **5** (remote API
+Most likely the credentials expired. **How long a Scraping Browser profile
+lives is not a fixed figure** — an endpoint set as a repository secret was
+still accepted ten days later — but when it is gone the endpoint answers HTTP 401 `deny_no_user`, the run exits **5** (remote API
 error) and nothing about your code or the site has changed — mint new
 credentials.
 
@@ -370,10 +371,10 @@ The engine names both causes because they want opposite responses:
 | HTTP 500 | the profile is BUSY — one live connection per `pid`, and another run holds it | wait, or use a different `pid` |
 | HTTP 401, `deny_no_user` | the profile is GONE | get new credentials |
 
-This is why the canary treats an expired endpoint as a SKIP rather than a
-failure — and why it is dispatch-only with no schedule and no badge. A secret
-that goes stale in a day would make a scheduled check red every morning from
-the second, and a check that is always red teaches everyone to ignore checks.
+The canary reports that as a FAILURE (exit 5, "the content was never
+obtained") with the cause named: an expired secret says nothing about the
+site or the code, but a run that never reached the site has tested nothing,
+and a green check over it would claim otherwise. Refresh the secret.
 
 ---
 

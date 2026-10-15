@@ -29,6 +29,18 @@ live_results.zip
 *_debug.html
 *_debug.png
 *.html.page*
+# --dump-html X --pages N writes X.page1..X.pageN whatever X ends in, so
+# `out.json.page3` is a dump too.
+*.page[0-9]*
+# A raw dump written at the top of the repo (`--dump-html dump.html`). No
+# HTML file belongs at the root; templates and docs are not HTML here.
+/*.html
+# Scratch directories by KIND rather than by one remembered name.
+live/
+out/
+output/
+dumps/
+scratch/
 
 # --- captures kept for parser work ---------------------------------------
 # The smoke suite's fixtures are committed (trimmed, inside smoke_test.py);
@@ -78,7 +90,7 @@ secrets*
 # recoverable only because that repo was private at the time. On 2026-09-17
 # a sibling had an untracked `.env.bak` holding a 32-hex key in a PUBLIC
 # repository, one `git add -A` from publication. Craigslist was fixed then
-# and the fix never reached anyone else, which is §16's rule unapplied: when
+# and the fix never reached anyone else, which is the family's rule unapplied: when
 # you fix one, check the siblings.
 .env*
 !.env.example

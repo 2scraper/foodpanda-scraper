@@ -8,7 +8,7 @@ a page it served from a page it refused.
 
 There is no JSON-LD path, and that is a measurement
 ---------------------------------------------------
-§4 says to count the `application/ld+json` blocks before writing either path.
+A family rule says to count the `application/ld+json` blocks before writing either path.
 Counted, on every capture in `captures/`:
 
     /                          1 block   WebSite
@@ -21,12 +21,11 @@ The `CollectionPage` looks promising and is not: its `mainEntity` is an
 cuisine, no image — on a page whose DOM carries FORTY-EIGHT vendor tiles. It
 is an SEO snippet for the first row of the grid, not a description of the
 page. Building the primary path on it would silently return 6 rows out of 48
-and report success, which is this codebase's most common historical bug class
-(§8).
+and report success, which is this codebase's most common historical bug class.
 
 So the primary path is the site's OWN DATA ATTRIBUTE — every tile is a
 `<li data-testid="{vendor_code}">` — with the `/restaurant/{code}/{slug}` URL
-pattern as the fallback, exactly as §4 prescribes for a site with no usable
+pattern as the fallback, exactly as a family rule prescribes for a site with no usable
 structured data. The JSON-LD is still read, for one thing only: the six names
 it publishes are used to cross-check the first six parsed titles in the
 offline suite, which is free and catches a tile-scoping regression.
@@ -42,7 +41,7 @@ so a design-system version bump that appends a modifier does not break it.
 
 Tile scoping
 ------------
-§4's "junk-link data theft" failure cannot happen here, and the reason is
+The family's "junk-link data theft" failure cannot happen here, and the reason is
 worth stating rather than assuming: a vendor tile is a single `<li>` carrying
 the vendor's code in `data-testid`, and every field is read from INSIDE that
 element. There is no widening walk from an anchor to its tile at all, so
@@ -71,7 +70,7 @@ logger = logging.getLogger("product_parser")
 # ---------------------------------------------------------------------------
 # foodpanda publishes no cross-country `<link rel="alternate" hreflang>` set —
 # checked on three captures, and each carries exactly one self-referencing
-# alternate — so §5's "take the host table from the site's own hreflang" has
+# alternate — so the family's "take the host table from the site's own hreflang" has
 # nothing to take. The list below is therefore the brand's own country
 # operations, and every entry was then PROBED with a real browser rather than
 # trusted; `live/host_probe.json` holds the raw result and the README the
@@ -122,7 +121,7 @@ REFUSED_HOSTS: Dict[str, str] = {
     # Refused with the reason rather than left in HOSTS, because a run
     # against it would fetch Robinhood, classify it `blocked` (correctly — it
     # is not built out of foodpanda's assets) and report exit 3, sending the
-    # reader to look for a proxy problem that does not exist (§5).
+    # reader to look for a proxy problem that does not exist.
     "foodpanda.co.th": (
         "foodpanda.co.th no longer serves foodpanda. Measured 2026-09-15: it "
         "answers HTTP 200 and redirects to robinhood.co.th — a different "
@@ -141,7 +140,7 @@ REFUSED_HOSTS: Dict[str, str] = {
 def site_host(url: str) -> Optional[str]:
     """The supported host this URL is on, or None.
 
-    Matches with or without `www.`, because §5's lesson from a sibling repo
+    Matches with or without `www.`, because the family's lesson from a sibling repo
     is that a URL rebuilt as `https://www.{host}{path}` never matches the
     page's own on a site that answers bare. All ten foodpanda country
     sites were probed both ways; see `live/host_probe.json`.
@@ -204,7 +203,7 @@ _AREA_RE = re.compile(r"^/city/(?P<city>[^/]+)/area/(?P<area>[^/]+)/?$", re.I)
 _VENDOR_RE = re.compile(r"^/restaurant/(?P<code>[a-z0-9]{2,12})/(?P<slug>[^/]+)/?$",
                         re.I)
 
-# The id recovery §5 asks for. JSON-LD carries no vendor code at all — its six
+# The id recovery a family rule asks for. JSON-LD carries no vendor code at all — its six
 # ListItems have a `url` and a `name` and nothing else — so the URL is the
 # only structured source, and the tile's `data-testid` is the primary one.
 _SKU_IN_URL_RE = re.compile(r"/restaurant/([a-z0-9]{2,12})/", re.I)
@@ -316,7 +315,7 @@ def listing_page_kind(url: str) -> Optional[str]:
 #        class="page-number-link">2</a></span>
 #
 # — so `?page=N` is the site's own contract rather than this repo's
-# convention. §7's "verify first" was done the only way that counts: a cold
+# convention. The family's "verify first" was done the only way that counts: a cold
 # fetch of `?page=2` returned 48 tiles whose codes did not overlap page 1's.
 #
 # Because the addresses are real, `--concurrency` above 1 is allowed here
@@ -325,7 +324,7 @@ def listing_page_kind(url: str) -> Optional[str]:
 PAGINATES_BY_URL = True
 PAGE_PARAM = "page"
 
-# `link[rel=next]` FIRST, per §5 — standards-based signals before build
+# `link[rel=next]` FIRST — standards-based signals before build
 # artefacts — even though foodpanda publishes none today: 0 occurrences
 # across every capture. It leads the list so that if the site ever adds one,
 # it is preferred over the testid without an edit. The second entry is the
@@ -352,7 +351,7 @@ def paginates_by_url(url: str) -> bool:
     parameter — so asking for page 2 of `/` would fetch the same 53 tiles
     again, find no new sku, and call the listing exhausted. That is the right
     answer arrived at by luck; refusing it up front is the right answer
-    arrived at on purpose (§7).
+    arrived at on purpose.
     """
     if listing_kind(url) != "listing":
         return False
@@ -363,7 +362,7 @@ def page_url(url: str, page: int) -> str:
     """This listing's address for page `page`.
 
     REPLACES an existing `page` parameter rather than appending a second one,
-    and preserves every other parameter — §5's rule, and the site's own links
+    and preserves every other parameter — the family's rule, and the site's own links
     are built the same way. Page 1 is the bare URL with the parameter
     removed, because that is the address the site's canonical link uses and a
     `?page=1` row would otherwise dedupe against a bare-URL row as two
@@ -397,7 +396,7 @@ SELECTORS: Dict[str, str] = {
     # whose `data-testid` IS the vendor code. Matched on the class as a
     # substring so `--large`, `--small` and any future modifier all match.
     "item_card": "li[class*='bds-c-vendor-tile']",
-    # The fallback anchor, and the one §4 calls a contract with search
+    # The fallback anchor, and the one a family rule calls a contract with search
     # engines: the product URL pattern.
     "item_link": "a[href^='/restaurant/']",
     "name": "[class*='bds-c-vendor-tile__name']",
@@ -416,7 +415,7 @@ SELECTORS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Numbers
 # ---------------------------------------------------------------------------
-# The grouping conventions §4 lists, including the no-break variants: a
+# The grouping conventions a family rule lists, including the no-break variants: a
 # rendered page uses NBSP or a narrow NBSP so a number does not wrap, and
 # missing them parses "1 234" as 234.
 _GROUP_SPACES = "    "
@@ -424,7 +423,7 @@ _AMOUNT = (r"\d{1,3}(?:[.,%s]\d{3})+(?:[.,]\d{1,2})?"
            r"|\d+(?:[.,]\d{1,2})?" % _GROUP_SPACES)
 
 # Currency as foodpanda's deal labels write it, longest-first so a prefix is
-# not swallowed by the bare symbol it contains (§4). Every one of these was
+# not swallowed by the bare symbol it contains. Every one of these was
 # read off a real label or the site's own configuration, not from a list of
 # currencies the countries use: "S$ 15" and "Rs. 300" are what the tiles say.
 CURRENCY_SYMBOLS: Tuple[Tuple[str, str], ...] = (
@@ -448,7 +447,7 @@ _PERCENT_RE = re.compile(r"(?P<upper>up\s+to\s+)?-?\s*(?P<pct>\d{1,3}(?:[.,]\d+)
 def _normalize_amount(raw: str) -> Optional[float]:
     """Turn a rendered number into a float, or None.
 
-    Implements §4's three grouping conventions and its two disambiguation
+    Implements the family's three grouping conventions and its two disambiguation
     rules: when both a dot and a comma appear the LAST one is the decimal
     point, and when only one appears, exactly three trailing digits means a
     thousands grouping (no currency in this family's range has a three-digit
@@ -481,7 +480,7 @@ def _normalize_amount(raw: str) -> Optional[float]:
 def int_in(text: str) -> Optional[int]:
     """The first whole number in `text`, grouping separators included.
 
-    "(1,234)" -> 1234, and NOT 1 — the amazon-scraper review-count bug (§10)
+    "(1,234)" -> 1234, and NOT 1 — the amazon-scraper review-count bug
     is exactly this function written as `re.search(r"\\d+", ...)`.
     """
     match = re.search(_AMOUNT, text or "")
@@ -491,7 +490,7 @@ def int_in(text: str) -> Optional[int]:
     return int(value) if value is not None else None
 
 
-# What a BARE `$` means on each country site. §4 ranks a bare symbol as the
+# What a BARE `$` means on each country site. A family rule ranks a bare symbol as the
 # weakest evidence there is — "`$` reads as USD because that is what it means
 # on a US site, and nothing better is available" — but here something better
 # IS available: the hostname. None of foodpanda's ten country sites is
@@ -511,7 +510,7 @@ def currency_in(text: str, url: str = "") -> Optional[str]:
 
     Longest symbol first, so a prefix is not swallowed by the bare symbol it
     contains — `HK$` must not read as `$`. Returns None rather than a
-    defaulted currency when the label states no symbol at all (§8: a missing
+    defaulted currency when the label states no symbol at all (a missing
     currency is null).
 
     `url` resolves a BARE `$` through the country site, which is a fact about
@@ -533,7 +532,7 @@ def currency_in(text: str, url: str = "") -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Detection: served, refused, or challenged
 # ---------------------------------------------------------------------------
-# §18's rule, and this site proves it twice over. BOTH of these are on EVERY
+# The family's rule, and this site proves it twice over. BOTH of these are on EVERY
 # page foodpanda serves, and either one as a marker would report the whole
 # catalogue as blocked:
 #
@@ -616,8 +615,8 @@ BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
     # `chrome-extension://…/content/captcha/turnstile/hunter.js` with
     # `data-ts-input="cf-turnstile-response"` into every page it loads — and
     # ZERO times on the real Cloudflare challenge. A marker that fires on
-    # good pages and misses the bad one is worse than no marker (§18), and
-    # this is §8's extension trap arriving for real.
+    # good pages and misses the bad one is worse than no marker, and
+    # this is the family's extension trap arriving for real.
     "challenges.cloudflare.com",
 )
 
@@ -626,7 +625,7 @@ BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
 # neither has ever been seen on foodpanda.
 #
 # Listed so a page carrying one is reported as `blocked` rather than having a
-# solve attempted and billed for a task this code cannot build (§8: detected
+# solve attempted and billed for a task this code cannot build (detected
 # != blocking != paying).
 UNSOLVABLE_CHALLENGE_MARKERS: Tuple[str, ...] = (
     "hcaptcha.com/captcha",
@@ -647,7 +646,7 @@ SOLVABLE_PRODUCTS = (
 _SITEKEY_RE = re.compile(r'data-sitekey="([^"]+)"')
 
 # Positive detection: what every page this site serves is built out of, and
-# what no interstitial and no browser error page is (§8, §18). foodpanda's
+# what no interstitial and no browser error page is. foodpanda's
 # own media hosts. This is the signal that answers correctly for Chromium's
 # built-in network-error page, which carries the SITE'S hostname in its
 # `<title>` and would pass any title check.
@@ -658,7 +657,7 @@ _ASSET_MARKER = re.compile(
 # was the /city index, at 22 — and 0 on every refusal document, PerimeterX
 # and Cloudflare alike. Three is a wide margin under the leanest real page,
 # and it is checked AFTER the unambiguous positive signals rather than before
-# them (§17's classification-order trap).
+# them (the family's classification-order trap).
 _ASSET_MIN_MATCHES = 3
 
 
@@ -760,7 +759,7 @@ def is_challenge_page(html: str) -> bool:
 # has vendors on it and every address that does not exist is answered with a
 # 404 document rather than an empty grid.
 #
-# §18's lesson is why this is a list and not a guess: a marker set written
+# The family's lesson is why this is a list and not a guess: a marker set written
 # from imagination matches nothing and turns an empty answer into a
 # twenty-five-second wait and the wrong exit code. So the list stays empty
 # until somebody captures the sentence, and `detect_page_state` reaches
@@ -782,7 +781,7 @@ def is_no_results(html: str) -> bool:
 
     A POSITIVE signal only. A listing with an empty grid and none of this
     copy is a page still painting, not an empty catalogue, and the two want
-    opposite responses (§18).
+    opposite responses.
     """
     text = html or ""
     if any(marker in text for marker in NOT_FOUND_MARKERS):
@@ -796,7 +795,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     """Which of five states this response is.
 
     Ordered by how much each signal PROVES rather than by what is cheap to
-    check (§17). The unambiguous positive — tiles in the document — comes
+    check. The unambiguous positive — tiles in the document — comes
     first, so a page the site plainly served can never be reported as
     blocked; the site's own 404 copy comes before any threshold; and the
     asset count is last, because it is the only signal here that is a
@@ -804,7 +803,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
 
     `status` is positional and SECOND, matching `page_flow.classify`. Two
     engines in a sibling repo called this with `status` as a keyword and both
-    crashed on their first fetch, invisibly to every offline check (§17) —
+    crashed on their first fetch, invisibly to every offline check —
     the smoke suite here binds every shared-module call in every engine for
     that reason.
     """
@@ -834,14 +833,14 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
         return "challenge"
 
     # 6. Not built out of this site's assets at all — a browser error page or
-    #    somebody else's interstitial. §18: Chromium's own network-error page
+    #    somebody else's interstitial. Chromium's own network-error page
     #    carries the site's hostname in its title and nothing else of the
     #    site's, and this is the check that answers it correctly.
     if not served_by_foodpanda(html):
         return "blocked"
 
     # 7. Served, ours, and the grid is not there yet. Wants the readiness
-    #    wait, not a refetch: refetching a shell buys another shell (§18).
+    #    wait, not a refetch: refetching a shell buys another shell.
     return "shell"
 
 
@@ -887,8 +886,8 @@ def _rating(tile) -> Tuple[Optional[float], Optional[int], Optional[bool]]:
     rating = _normalize_amount(value_text) if value_text else None
     # A rating out of five: anything outside that range is not a rating, and
     # silently writing 57.0 into the column because the two spans were read
-    # in the wrong order is the kind of 100%-populated-and-wrong column §10
-    # exists to catch.
+    # in the wrong order is the kind of 100%-populated-and-wrong column that a coverage
+    # check alone cannot catch.
     if rating is not None and not (0.0 <= rating <= 5.0):
         logger.warning("discarding out-of-range rating %r on tile %r",
                        value_text, tile.get("data-testid"))
@@ -930,12 +929,12 @@ def _discount(tags: List[str], url: str = "") -> Tuple[
       * the label verbatim, so a wrong parse is visible;
       * whether it said "Up to", which makes the number a CEILING — 21% of
         the measured labels are that shape, and reporting "Up to 35% off" as
-        a 35% discount is a guess presented as a fact (§8);
+        a 35% discount is a guess presented as a fact;
       * the minimum spend where the label attaches one ("20% off Rs. 300",
         "15% off S$ 15"), which is the only money on a tile and is a
         condition of a voucher rather than a price.
 
-    §4's "strip percentages BEFORE matching" applies in reverse here: the
+    The family's "strip percentages BEFORE matching" applies in reverse here: the
     percentage is what is wanted, so the MINIMUM SPEND is matched only in
     what remains after the percentage has been consumed. Without that,
     "20% off Rs. 300" yields a minimum order of 20.
@@ -1092,7 +1091,7 @@ def _tile_info(tile, url: str = ""):
 def _image_url(tile) -> Optional[str]:
     """The tile's image, recognised POSITIVELY by the site's media hosts.
 
-    §4's rule in its narrow form: a positive host check means a future
+    The family's rule in its narrow form: a positive host check means a future
     placeholder, a tracking pixel or a data-URI spinner cannot fill this
     column with something that is not a photo of the vendor.
     """
@@ -1110,7 +1109,7 @@ def parse_products(html: str, url: str, page: int = 1,
     `page` is threaded in rather than inferred, and it matters: `position`
     restarts at 1 on every page, so without the page number 60 of 119 rows in
     a sibling repo's two-page run silently claimed a position another row
-    already held (§18). Where the document holds a whole SCROLLED listing —
+    already held. Where the document holds a whole SCROLLED listing —
     which is what an infinite-scroll capture is — the site's own page
     separators are used instead, so each tile gets the page it really came
     from rather than all of them getting `page`.
@@ -1254,7 +1253,7 @@ def jsonld_vendor_names(html: str) -> List[str]:
             if not isinstance(node, dict) or node.get("@type") != "CollectionPage":
                 continue
             # `mainEntity` may legally be absent, null, a dict or a list —
-            # §4's table, and a `.get()` default does NOT cover an explicit
+            # the family's table, and a `.get()` default does NOT cover an explicit
             # null.
             main = node.get("mainEntity") or {}
             if isinstance(main, list):
@@ -1275,7 +1274,7 @@ class ResultsRange:
 
     foodpanda publishes no counter — no "1-48 of 1,904", no total anywhere in
     the document — so `expected_on_page` is None on every page and the
-    arithmetic §8 describes for a ranked grid is not available here. Stated
+    arithmetic a family rule describes for a ranked grid is not available here. Stated
     as a measurement rather than left as an absent function, so the next
     reader does not go looking for a counter that is not there.
 

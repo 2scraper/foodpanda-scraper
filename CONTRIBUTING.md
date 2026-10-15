@@ -51,7 +51,7 @@ path.
    vendor code. If this moves the run reports 0 rows and exit 4, which is
    loud.
 2. **The link.** `a[href^="/restaurant/"]` — the fallback anchor, and the one
-   §4 calls a contract with search engines. A tile with no link at all does
+   a family rule calls a contract with search engines. A tile with no link at all does
    exist (1 of 1,904 measured), which is why the code is read from the `<li>`.
 3. **The info rows**, `[data-testid="bds-c-vendor-tile__info-row-text"]`, and
    the screen-reader labels beside them. These are read by MEANING rather
@@ -102,17 +102,15 @@ history needs a decision, not a red check on every push.
 
 Then the rest of the presentation, in the order that matters:
 
-1. `python3 smoke_test.py` green, and the canary dispatched at least once —
-   including its SKIP branch, which is what runs when no secret is set. That
-   branch WAS dispatched and confirmed green on 2026-09-15.
+1. `python3 smoke_test.py` green, and the canary dispatched at least once.
 
-   The canary is **dispatch-only and has no badge**, deliberately: this repo
-   runs nothing live on a timer. foodpanda refuses a large share of cold
+   The canary is **dispatch-only**: foodpanda refuses a large share of cold
    navigations even from a residential address (10 of 30 served, measured),
-   and a runner's datacentre address is worse — so a scheduled live check
-   would be noise at best. Set a secret and dispatch it by hand when you want
-   a real site-side check; with a secret in play a block IS a failure,
-   because then it means something.
+   and a runner's datacentre address is worse, so it needs a
+   `FOODPANDA_PROXY` or `FOODPANDA_CDP_ENDPOINT` secret. Without one it
+   FAILS with an error naming them, and a block, a run that never reached
+   the site or zero rows are failures too: only a run that parsed real rows
+   is green.
 2. The repo description, homepage and topics set (see the family notes on
    what those should say).
 3. Only then the row in the org profile README — and check it with an
