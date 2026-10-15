@@ -13,6 +13,8 @@ or from a half-empty output file.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-15
+
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used
 > to be accepted and made the page-load loop unreachable, so nothing was
 > fetched and the engine reported the browser's own blank page as a result:
@@ -71,7 +73,6 @@ or from a half-empty output file.
 - Removed the unused `single_page_mode` stop reason.
 - Comments, docs and release notes no longer cite section numbers of an
   internal document readers cannot open; a suite check keeps them out.
-
 - **`--retries 0` fetched nothing and called it a result.** The load loop is
   `range(1, retries + 1)`, so 0 never runs it and the engine judged
   `about:blank`. Three third-party audits of this family ran exactly that and
@@ -79,7 +80,6 @@ or from a half-empty output file.
   `page_flow.attempts` in every entry point; a check reads the source of each
   one and calls the validator, so a new engine declaring the flag with a
   plain int fails the suite.
-
 - **A challenge that never clears no longer buys a solve per retry.**
   `SOLVES_PER_PAGE` was enforced on only one of the two
   `handle_captcha_if_present` calls in a fetch attempt, so with no proxy pool
@@ -100,7 +100,6 @@ or from a half-empty output file.
   without `page`) must now agree, and a run that stopped at its own `--pages`
   limit is refused against a deeper run. `--force` still overrides, and a
   run with no `start_url` in its sidecar is let through as before.
-
 - **Scraper API: `waitFor` is now sent as a JSON object.** Measured
   2026-09-23 against `scraper.2captcha.com/tasks/sync`: the JSON-encoded
   string this client sent (the form older docs described) is refused with
@@ -141,11 +140,6 @@ or from a half-empty output file.
 - `SECURITY.md` said this project has no releases or tags; it has both.
 - The access badge now says what the README measures: no account needed,
   from a residential IP.
-
-## [0.2.2] — 2026-09-16
-
-### Fixed
-
 - **The README was missing its canary badge.** The workflow has been
   running all along; the badge that reports it was never added, so the
   one signal that says whether this scraper still works against the live
@@ -481,6 +475,7 @@ found only by running the SECONDARY engines rather than just the primary one.
   of foodpanda's assets — and reported exit 3, sending the reader after a
   proxy problem that does not exist (the family's `mediamarkt.lu` case).
 
+[0.3.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.3.0
 [0.2.1]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.1
 [0.2.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.0
 [0.1.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.1.0
