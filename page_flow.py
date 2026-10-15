@@ -2,7 +2,7 @@
 
 foodpanda answers a request five ways, and four of them want a different
 response, which is why this module exists rather than the same triage being
-written three times inside three engines and drifting apart (§1):
+written three times inside three engines and drifting apart:
 
     content    the vendor grid is in the document
     empty      the address does not exist — the site's own 404 document,
@@ -32,14 +32,14 @@ passes its own driver's primitives and keeps its browser plumbing to itself:
     page_height() -> Optional[int]      its scroll height
     sleep(ms) -> None                   wait
 
-No JavaScript crosses that boundary in either direction (§1): Selenium's
+No JavaScript crosses that boundary in either direction: Selenium's
 `execute_script` takes a function BODY with an explicit `return` where
 Playwright and pyppeteer take `() => expr`, so this module names the
 OPERATION and each engine spells it in its own driver's dialect.
 
 The grid is SERVER-RENDERED, which decides most of this file
 ------------------------------------------------------------
-§18 says which page kind server-renders its grid decides what "unknown"
+A family rule says which page kind server-renders its grid decides what "unknown"
 means, and the answer here was measured by reading the RESPONSE BODY rather
 than the settled DOM:
 
@@ -102,7 +102,7 @@ READY_SELECTOR = SELECTORS["item_card"]
 # same.
 READY_SELECTOR_LISTING = READY_SELECTOR
 
-# Above 1, per §5: waiting for a single match resolves on an unrelated node
+# Above 1: waiting for a single match resolves on an unrelated node
 # long before the grid paints. Two rather than a full page, so a genuinely
 # short last page is not made to spend the whole timeout — `min_matches`
 # clamps it further when the caller knows the page is short.
@@ -153,7 +153,7 @@ def wait_for_count(count, sleep, selector: str, want: int,
         Content Security Policy directive …
 
     which took a sibling repo's live run down with exit 1 — a crash, on that
-    site's most obvious URL (§18). foodpanda's own CSP was not audited page
+    site's most obvious URL. foodpanda's own CSP was not audited page
     kind by page kind here, which is exactly why the question is not being
     asked: counting elements goes over CDP instead (`querySelectorAll`
     through the protocol, not through eval), so it works under any CSP and
@@ -187,7 +187,7 @@ def wait_for_count(count, sleep, selector: str, want: int,
 # The scroll, used on the home page and nowhere else
 # ---------------------------------------------------------------------------
 # Three stable rounds, not one: the next batch takes longer to arrive than a
-# single pause (§8).
+# single pause.
 SCROLL_STABLE_ROUNDS = 3
 # The home page is a curated set, not a catalogue — 47 to 83 vendor links
 # across the ten country sites probed — so a handful of rounds reaches the
@@ -220,7 +220,7 @@ def scroll_until_settled(count, page_height, scroll_to_bottom, sleep,
     stubbed out.
 
     Scrolls to `document.body.scrollHeight` rather than wheeling a fixed
-    distance — §8's rule, earned when a 2,400px wheel stopped three rounds
+    distance — the family's rule, earned when a 2,400px wheel stopped three rounds
     short of the bottom of a sibling repo's 7,600px grid and a run took 30 of
     50 cards while looking settled. Requires the count AND the height to hold
     still for THREE rounds, because the next batch takes longer to arrive
@@ -268,7 +268,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     Getting that wrong is not a style question: a sibling repo shipped two of
     three engines calling this as `classify(html, url=...)`, both crashed on
     their first fetch, and nothing short of a live run or a signature-binding
-    check saw it (§17). This repo's smoke suite binds every shared-module
+    check saw it. This repo's smoke suite binds every shared-module
     call in every engine for that reason.
     """
     if html is None:
@@ -277,7 +277,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
 
 
 # The retry/solve/blocked decision as DATA rather than as three copies of an
-# if-chain in three engines (§1).
+# if-chain in three engines.
 #
 #   parse    is there anything on this page worth writing down?
 #   retry    would fetching it again, later or from a different exit,
@@ -290,7 +290,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     # again gets the same 404.
     "empty":     {"parse": False, "retry": False, "solve": False, "blocked": False},
     # Served and still painting. Wants the readiness wait, not another fetch:
-    # refetching a shell buys another shell (§18). Parsed because by the time
+    # refetching a shell buys another shell. Parsed because by the time
     # an engine asks, the wait has already run.
     "shell":     {"parse": True,  "retry": False, "solve": False, "blocked": False},
     "challenge": {"parse": False, "retry": True,  "solve": True,  "blocked": False},
@@ -333,7 +333,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 # a new browser and a pause.
 #
 # So the refusal is a property of the SESSION and the moment, not of the
-# address — which is why a fresh browser is what re-rolls it (§8: "a rotation
+# address — which is why a fresh browser is what re-rolls it ("a rotation
 # is a fresh browser") and why the budget below is non-zero. It is larger
 # with a pool because a different exit is a stronger re-roll than a different
 # session from the same address.
@@ -341,7 +341,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 # Four attempts against a measured per-attempt success of about a third puts
 # a page's chance of being served near 80%; five puts it near 87%. The
 # engines READ these constants rather than computing their own budget — a
-# policy constant nothing consults is the same defect as dead code (§17), and
+# policy constant nothing consults is the same defect as dead code, and
 # the smoke suite asserts each of them has a consumer outside this module.
 RETRY_ON_BLOCKED = True
 BLOCK_RETRIES_WITHOUT_POOL = 4
@@ -427,12 +427,12 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
 # ---------------------------------------------------------------------------
 # Pagination — an address the site publishes itself
 # ---------------------------------------------------------------------------
-# Unusually for this family there is a `page_url()` to call, and §7's "verify
+# Unusually for this family there is a `page_url()` to call, and the family's "verify
 # first" was satisfied the only way that counts: the site renders its own
 # `?page=N` links between batches, and a cold fetch of `?page=2` returned 48
 # tiles sharing no vendor code with page 1. See product_parser.
 #
-# The three layers §7 asks for, weakest last:
+# The three layers a family rule asks for, weakest last:
 #   1. `link[rel=next]` leads NEXT_PAGE_SELECTOR (foodpanda publishes none
 #      today; it leads so that the day it does, nothing needs editing).
 #   2. `page_url()` reconstructing `?page=N` — what actually works.
@@ -458,7 +458,7 @@ def pagination_is_addressable(page1_url: str,
                               ) -> bool:
     """Whether page N of this listing can be fetched without fetching N-1.
 
-    §7's "plan page URLs up front, but VERIFY first". The convention is
+    The family's "plan page URLs up front, but VERIFY first". The convention is
     `?page=N`, and it is verified two ways depending on what page 1 gave us:
 
       * Page 1 advertised its own page links — which a SCROLLED listing does,
@@ -548,7 +548,7 @@ def page_gap(html: Optional[str], parsed: int) -> Optional[int]:
     """How many tiles the page's own counter says are missing, or None.
 
     ALWAYS None on this site, because there is no counter to do the
-    arithmetic with (§8's rank-gap trick needs the site to publish ranks, and
+    arithmetic with (the family's rank-gap trick needs the site to publish ranks, and
     foodpanda publishes none). None rather than 0 is the point: an unknown
     gap is not a gap of zero, and the two must not read the same in a
     sidecar.
@@ -585,7 +585,7 @@ def concurrency_limit(url: str) -> Optional[int]:
     concurrency here buys throughput at the cost of REFUSALS. N workers is N
     times the request rate from one address, and the refusal rate on this
     site is a function of exactly that. The engines warn when concurrency is
-    raised without a pool (§7) and this is why.
+    raised without a pool and this is why.
     """
     return None if paginates_by_url(url) else 1
 
@@ -655,3 +655,51 @@ def attempts(value) -> int:
             f"With 0 the load loop never runs, nothing is fetched, and the "
             f"engine reports the browser's blank page as a result.")
     return number
+
+
+# ---------------------------------------------------------------------------
+# The other numeric flags
+# ---------------------------------------------------------------------------
+def numeric_flag(flag: str, kind, minimum, meaning: str):
+    """Build an argparse `type=` that rejects values below `minimum`, naming
+    the flag. A negative page count, delay or worker count is never what a
+    caller meant, and passing it through gives a run that silently does
+    something else: `range(2, -1)` fetches nothing past page 1, and
+    `time.sleep(-1)` raises in the middle of a run instead of at the prompt.
+    """
+    def convert(value):
+        try:
+            number = kind(value)
+        except (TypeError, ValueError):
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be a{'n integer' if kind is int else ' number'}, "
+                f"not {value!r}")
+        if number != number or number < minimum:   # NaN fails too
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be at least {minimum}, not {value} ({meaning})")
+        return number
+    convert.__name__ = flag.lstrip("-").replace("-", "_")
+    return convert
+
+
+pages_arg = numeric_flag("--pages", int, 1, "it counts listing pages")
+concurrency_arg = numeric_flag("--concurrency", int, 1,
+                                "it counts browser workers")
+delay_arg = numeric_flag("--delay", float, 0, "seconds between pages")
+retry_delay_arg = numeric_flag("--retry-delay", float, 0,
+                                "seconds between attempts")
+block_retries_arg = numeric_flag("--proxy-block-retries", int, 0,
+                                  "it counts re-fetches after a block")
+
+
+def failure_stop_reason(outcome) -> str:
+    """The run's `stop_reason` for a page that did not succeed.
+
+    One spelling for all three engines, so a parser failure on a served grid
+    cannot be reported as a block in one engine and a timeout in another.
+    """
+    if outcome.load_failed:
+        return "page_load_timeout"
+    if getattr(outcome, "parser_failed", False):
+        return "parser_found_nothing"
+    return f"blocked_{outcome.blocked_by}"

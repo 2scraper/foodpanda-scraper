@@ -77,7 +77,7 @@ CREDENTIAL_ALLOWED = (
     # pasted while debugging. An allowlist entry would have switched the
     # check off exactly there. A sibling repo's copy of this script FAILED ON
     # ITS OWN MAIN for the opposite reason: its fixtures were neither
-    # allowlisted nor written this way (§17).
+    # allowlisted nor written this way.
     "{login}", "{user}", "password}@", "***", "u:p@h",
     "login:password@host:port",     # the shape a refusal message prints
     "user:secret@",                 # the proxy-pool masking fixtures
@@ -103,7 +103,28 @@ HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest",
                  "checksum")
 
-SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example",
+                    ".json", ".bak")
+
+# Directories never read, compared against the path RELATIVE TO THE REPO.
+# Comparing the absolute path's parts skipped everything in a clone that
+# happened to live under a directory called `venv` or `.venv` — the scan read
+# 0 files and printed "nothing credential-shaped".
+SKIPPED_DIRS = {".git", "__pycache__", ".venv", "venv"}
+
+
+def _is_scanned_name(path):
+    """A scannable suffix, or a renamed copy of `.env` (`.env.bak`,
+    `.env.local`, `.env.save`).
+
+    `.env` ITSELF is not read: it is where the README tells a user to put
+    their real key, so scanning it would fail every configured checkout. A
+    COPY of it is the case this scan exists for — a backup made while testing
+    is the file that reaches a commit by `git add -A`.
+    """
+    if path.name == ".env":
+        return False
+    return path.suffix in SCANNED_SUFFIXES or path.name.startswith(".env.")
 
 
 # A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
@@ -114,7 +135,7 @@ SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
 # into pip's vendored code and flags a 32-hex string in `_elffile.py` as
 # key-shaped. Correct about the string, wrong about the file — and it is the
 # FIRST thing a new user sees from `python3 smoke_test.py`. A guard people
-# have to argue with is one they learn to suppress (CLAUDE.md §22).
+# have to argue with is one they learn to suppress.
 #
 # Deliberately NOT a narrowing of what gets scanned: an untracked file is
 # still read, because a key pasted into a scratch file beside the scripts is
@@ -143,10 +164,10 @@ def _is_in_virtualenv(path):
 
 def scanned_files():
     for path in sorted(REPO.rglob("*")):
-        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
+        if not path.is_file() or not _is_scanned_name(path):
             continue
-        if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+        if any(part in SKIPPED_DIRS
+               for part in path.relative_to(REPO).parts):
             continue
         if _is_in_virtualenv(path):
             continue
@@ -238,6 +259,12 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+    if scanned == 0:
+        # A scan that read nothing has proved nothing. Said loudly rather
+        # than printed as "ok", which is what a clone under a directory the
+        # skip list happened to name used to produce.
+        failed.append(f"0 files scanned under {REPO} — the scan read "
+                      f"nothing, so it cannot report clean")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed

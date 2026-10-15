@@ -186,9 +186,17 @@ class PageOutcome:
     # short list rather than by keeping the page's HTML around, which is 1 MB.
     jsonld_names: Optional[List[str]] = None
 
+    # True when the page was served WITH vendor tiles in it (state
+    # "content") and the parser still produced zero rows. That is a defect in
+    # this repo's reading of the page, not an empty listing, so it fails the
+    # page and the run ends with `parser_found_nothing` (exit 5 holding
+    # nothing, exit 6 holding earlier pages) rather than exit 4.
+    parser_failed: bool = False
+
     @property
     def ok(self) -> bool:
-        return not self.load_failed and self.blocked_by is None
+        return (not self.load_failed and self.blocked_by is None
+                and not self.parser_failed)
 
 
 ITEM_LINK_SELECTOR = page_flow.READY_SELECTOR_LISTING
@@ -198,7 +206,7 @@ ITEM_LINK_SELECTOR = page_flow.READY_SELECTOR_LISTING
 # nodes across 1,952 tiles on two country sites — so `price` is not a column
 # on this repo's `Product` and a price-coverage threshold would describe
 # nothing. Porting the sibling repo's would be dead code that looks
-# load-bearing (§4).
+# load-bearing.
 #
 # What IS worth a floor is the share of rows that got the two columns every
 # tile publishes. Measured: 1,904 of 1,904 tiles carried a name and an image,
@@ -257,7 +265,7 @@ def _scroll_to_bottom(page) -> None:
 
     A fixed distance falls behind a page that grows as it loads, and a
     sibling repo's 2400px wheel stopped three rounds short of a 7600px grid
-    and never reached the trigger (§8).
+    and never reached the trigger.
 
     Only the HOME page is ever scrolled here — every other listing has
     per-page addresses and fetching those is better in every way that
@@ -685,7 +693,7 @@ def handle_captcha_if_present(page, args, budget) -> bool:
 
     The one refusal nothing can buy is PerimeterX's widget-less stub: 4.7 KB,
     24 `px-captcha` references, no widget at all. That one is `blocked`, and
-    nothing is attempted or billed for it (§8: detected != blocking !=
+    nothing is attempted or billed for it (detected != blocking !=
     paying). Solving is still not the CHEAPEST move here — the refusal is
     per-session and a fresh browser clears it free — which is why
     `when-blocked` is the default rather than `always`.
@@ -771,9 +779,10 @@ def handle_captcha_if_present(page, args, budget) -> bool:
                     else " (no callback was captured — relying on the form "
                          "field)")
         if challenge.solved_user_agent:
-            logger.info("2captcha solved it against user agent %r. Cloudflare "
-                        "checks that on a Challenge page, so a mismatch here "
-                        "is the likeliest reason a paid token is refused.",
+            logger.info("2captcha solved it against user agent %r. Logged so "
+                        "a refused token can be checked against it; on this "
+                        "site a token minted under a different user agent "
+                        "was accepted, so a mismatch alone is not the cause.",
                         challenge.solved_user_agent[:60] + "…")
     else:
         page.evaluate(INJECT_TOKEN_JS, token)
@@ -796,7 +805,7 @@ def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
     restarts at 1 on every page: without the page number beside it, a row
     from page 2 claims the same position as one from page 1 and the two are
     indistinguishable in the output. A sibling repo shipped 120 rows all
-    labelled page 1 for exactly that reason (§18).
+    labelled page 1 for exactly that reason.
 
     `--category` deliberately does NOT reach this function. On this site the
     `category` column holds the vendor's own cuisines, read off the tile, and
@@ -852,9 +861,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Retry a navigation timeout rather than ending the run on it. One
         # network flap on page 12 of 50 should not break the loop.
         load_failed, exit_failed = False, None
+        status = None
         for attempt in range(1, args.retries + 1):
             try:
-                session.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                response = session.page.goto(url, wait_until="domcontentloaded",
+                                             timeout=60000)
+                # The HTTP status reaches the classifier. Without it a
+                # branded refusal with no vendor marker on it (403, 429,
+                # 5xx) looks like an unpainted shell, is waited on, parsed
+                # to 0 rows and reported as an empty listing.
+                status = response.status if response is not None else None
                 load_failed = False
                 break
             except (PWTimeout, PWError) as e:
@@ -888,11 +904,13 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
-            # before judging what came back.
+            # before judging what came back — and stop trusting the status
+            # of the document the solve replaced.
             session.page.wait_for_timeout(1000)
+            status = None
 
         html = _content_when_settled(session.page) or ""
-        state = _classify(session.page, html)
+        state = _classify(session.page, html, status)
 
         # "Not painted yet" is not a fault. A page foodpanda served, built out
         # of its own assets but with no grid in it yet, is a SHELL (see
@@ -916,7 +934,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 logger.info("The grid still had not painted after %.0fs "
                             "(%d match(es)).", wait_timeout / 1000, found)
             html = _content_when_settled(session.page) or html
-            state = _classify(session.page, html)
+            state = _classify(session.page, html, status)
 
         # No interstitial-settling step here, and the reason is that
         # foodpanda's refusal does not settle into anything: PerimeterX's
@@ -938,8 +956,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if page_flow.should_solve(state):
             if handle_captcha_if_present(session.page, args, budget):
                 session.page.wait_for_timeout(1000)
+                # The solve replaced the document; its status is not this
+                # page's status.
+                status = None
                 html = _content_when_settled(session.page) or html
-                state = _classify(session.page, html)
+                state = _classify(session.page, html, status)
                 # The VERIFIED outcome, and the only one worth reporting: a
                 # "ready" task result is not evidence the token works. This
                 # line is what says whether the money bought anything.
@@ -1070,7 +1091,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         content_timeout = page_flow.content_timeout_ms(args.mode)
         # A POLL, not wait_for_function, which hands the browser a string to
         # evaluate and dies under a CSP without `unsafe-eval` — it took a
-        # sibling repo's run down with exit 1 (§18). See
+        # sibling repo's run down with exit 1. See
         # page_flow.wait_for_count.
         found = page_flow.wait_for_count(
             lambda sel: len(session.page.query_selector_all(sel)),
@@ -1164,7 +1185,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
     # foodpanda publishes NO result total and no ranks, so there is no
     # arithmetic completeness check here of the kind some sibling repos get
-    # (§8's rank-gap trick needs the site to number its items). There is no
+    # (the family's rank-gap trick needs the site to number its items). There is no
     # counter element, no "1-48 of N", no total anywhere in the document —
     # checked on every capture. Both fields stay None rather than carrying a
     # number nobody can act on, and the sidecar's shape still matches the
@@ -1228,6 +1249,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             page_num, closed, total)
 
     if not products:
+        if state == "content":
+            # The page held vendor tiles (that is what "content" means) and
+            # the parse returned none: the tile markup moved and the parser
+            # did not follow. Not an empty listing — fail the page so the
+            # run cannot report it as exit 4 or as complete.
+            outcome.parser_failed = True
+            logger.error("Page %d was served WITH vendor tiles in it and "
+                         "parsed to 0 rows — a parser failure, not an empty "
+                         "listing. Reporting the page as failed "
+                         "(parser_found_nothing).", page_num)
         debug_html = f"{args.out}_page{page_num}_debug.html"
         debug_png = f"{args.out}_page{page_num}_debug.png"
         with open(debug_html, "w", encoding="utf-8") as f:
@@ -1407,8 +1438,7 @@ def scrape(args) -> int:
             outcomes.append(first)
 
             if not first.ok:
-                stop_reason = ("page_load_timeout" if first.load_failed
-                               else f"blocked_{first.blocked_by}")
+                stop_reason = page_flow.failure_stop_reason(first)
                 blocked = first.blocked_by is not None
             else:
                 seen_keys.update(p.sku for p in first.products if p.sku is not None)
@@ -1440,8 +1470,7 @@ def scrape(args) -> int:
                     failed = [o for o in rest if not o.ok]
                     if failed:
                         worst = min(failed, key=lambda o: o.page_num)
-                        stop_reason = ("page_load_timeout" if worst.load_failed
-                                       else f"blocked_{worst.blocked_by}")
+                        stop_reason = page_flow.failure_stop_reason(worst)
                         blocked = any(o.blocked_by for o in rest)
                     elif exhausted:
                         stop_reason = "no_new_products"
@@ -1469,8 +1498,7 @@ def scrape(args) -> int:
                         outcome = _fetch_one_page(session, args, pool, page_num, url)
                         outcomes.append(outcome)
                         if not outcome.ok:
-                            stop_reason = ("page_load_timeout" if outcome.load_failed
-                                           else f"blocked_{outcome.blocked_by}")
+                            stop_reason = page_flow.failure_stop_reason(outcome)
                             blocked = outcome.blocked_by is not None
                             break
 
@@ -1570,7 +1598,7 @@ def scrape(args) -> int:
                         100.0 * len(all_rows) / total_available)
         page_pairs = [(p.page, p.position) for p in all_rows]
         if len(set(page_pairs)) != len(page_pairs):
-            # One line, and it catches forever the bug §18 names: `position`
+            # One line, and it catches forever the bug a family rule names: `position`
             # restarts at 1 on every page, so without `page` threaded through
             # correctly two rows silently claim the same place in the
             # listing. A sibling repo shipped 60 of 119 rows doing exactly
@@ -1657,7 +1685,7 @@ def parse_args():
                         "holds the vendor's own cuisines, read off the tile, "
                         "and mixing a command-line string into it would leave "
                         "a consumer no way to tell the two apart.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.pages_arg, default=1,
                    help="Number of listing pages to crawl. A /city/{city} or "
                         "/city/{city}/area/{area} URL has real per-page "
                         "addresses — the site publishes `?page=N` links "
@@ -1666,8 +1694,8 @@ def parse_args():
                         "pagination of any kind, so --pages above 1 there is "
                         "honoured by scrolling further rather than by "
                         "fetching more URLs.")
-    p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--delay", type=page_flow.delay_arg, default=2.0, help="Delay between pages, seconds")
+    p.add_argument("--concurrency", type=page_flow.concurrency_arg, default=1, metavar="N",
                    help="Fetch pages through N parallel workers (default 1 — "
                         "unchanged sequential behaviour). Each worker runs its "
                         "own browser and holds its own proxy exit, so N>1 "
@@ -1683,7 +1711,7 @@ def parse_args():
                         "retried — see page_flow.STATE_POLICY — because an "
                         "address that does not exist is a correct answer, not "
                         "a fault.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_arg, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
@@ -1709,7 +1737,7 @@ def parse_args():
     p.add_argument("--proxy-shuffle", action="store_true",
                    help="Shuffle the pool at startup, so concurrent runs do not "
                         "all begin on the first exit in the file.")
-    p.add_argument("--proxy-block-retries", type=int, default=2,
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2,
                    help="When a page comes back refused (HTTP 403) or behind "
                         "a captcha, retry it from this many OTHER exits before "
                         "giving up (default 2). Needs a pool of more than one; "
@@ -1818,7 +1846,7 @@ def parse_args():
     # listing. `unsupported_reason` also covers the two cases where the URL
     # genuinely IS foodpanda and is still refused (the global landing page,
     # and a vendor page), because "is not a foodpanda site" would be false
-    # and would send the reader hunting for a typo (§5).
+    # and would send the reader hunting for a typo.
     why = unsupported_reason(args.url)
     if why:
         p.error(why + ".")
@@ -1849,7 +1877,7 @@ def parse_args():
         # Measured on this site, four runs of one URL within five minutes:
         # no fingerprint was served 48 rows on the first attempt twice, while
         # --fp-country pk AND --fp-country de (matching the exit) were each
-        # refused 4 of 4. So it is not the country mismatch §8 warns about —
+        # refused 4 of 4. So it is not the country mismatch a family rule warns about —
         # it is that an injected Windows identity contradicts the real
         # browser underneath it, and PerimeterX reads that as worse than an
         # honest browser.

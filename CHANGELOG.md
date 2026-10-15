@@ -20,7 +20,57 @@ or from a half-empty output file.
 > script of yours passes 0, pass **1**: the flag counts ATTEMPTS, so 1 means
 > "try once and do not retry".
 
+> **Behaviour change:** `--pages 0`, `--concurrency 0`, and a negative
+> `--pages`, `--concurrency`, `--delay`, `--retry-delay` or
+> `--proxy-block-retries` are now usage errors (exit 2) in all three engines,
+> and a negative `--retries`/`--retry-delay` in `scraper_api_client.py`.
+
+> **Behaviour change:** a page that is served WITH vendor tiles and parses to
+> zero rows now fails the page with `stop_reason: parser_found_nothing`:
+> exit 5 when nothing was gathered, exit 6 after earlier pages, where it used
+> to be exit 4 ("empty listing") or a `complete` run. The Playwright and
+> pyppeteer engines now also pass the navigation's HTTP status to the
+> classifier, so a refusal with no vendor marker on it under 401/403/429/5xx
+> is exit 3 rather than a 25-second wait and an exit-4 "empty listing".
+
+> **Behaviour change:** CSV cells that begin with `=`, `+`, `-`, `@`, tab, CR
+> or LF are prefixed with an apostrophe so a spreadsheet reads them as text.
+> JSON is unchanged; the sidecar records `csv_cells_escaped`.
+
+> **Behaviour change:** the canary FAILS when neither `FOODPANDA_PROXY` nor
+> `FOODPANDA_CDP_ENDPOINT` is set, and on exit 5; it used to skip green.
+
 ### Fixed
+
+- **Output files are replaced atomically.** JSON, CSV and the
+  `<out>.meta.json` sidecar are written to a temporary file in the same
+  directory, flushed, fsynced and renamed over the old one. A write that
+  failed half-way used to truncate the previous good file into invalid
+  JSON. A new file gets the mode `open()` would have given it under the
+  current umask, and an existing file keeps its own mode.
+- **`--allow-empty` on a complete, genuinely empty listing writes
+  `status: "complete"`**, not `"failed"`, so `diff_runs.py` can compare it.
+- **The credential scan reads what it used to skip.** Exclusions are judged
+  on the path inside the repository, so a clone under a directory called
+  `venv` no longer scans 0 files and reports clean; a scan that read nothing
+  now fails. Untracked `.json` dumps and `.env.*` backups are scanned
+  (`.env` itself, the user's own file, is not).
+- **pyppeteer no longer re-runs a plain load failure for every block
+  retry.** Only an unusable proxy exit, with a pool to rotate to, earns
+  another round — the same rule as the other two engines.
+- **The Scraping Browser credentials claim is corrected.** README,
+  TROUBLESHOOTING, `.env.example` and the canary said a profile "lives about
+  a day". That was never a measured constant (one endpoint was still
+  accepted ten days after it was set); they now say the credentials expire
+  and that HTTP 401 `deny_no_user` is the signal.
+- **The Turnstile log no longer calls a user-agent mismatch the likeliest
+  cause of a refused token**; on this site a token minted under a different
+  user agent was accepted.
+- `.gitignore` covers `--dump-html` page dumps of any name (`*.page[0-9]*`),
+  a root-level HTML dump and scratch directories (`live/`, `out/`, …).
+- Removed the unused `single_page_mode` stop reason.
+- Comments, docs and release notes no longer cite section numbers of an
+  internal document readers cannot open; a suite check keeps them out.
 
 - **`--retries 0` fetched nothing and called it a result.** The load loop is
   `range(1, retries + 1)`, so 0 never runs it and the engine judged
@@ -317,8 +367,7 @@ three engines that must agree.
 
 Five defects that no amount of reading found, two of them inherited from the
 family core. Every one was invisible to a green offline suite, and two were
-found only by running the SECONDARY engines rather than just the primary one
-(§16).
+found only by running the SECONDARY engines rather than just the primary one.
 
 * **A refused page was reported as an exhausted listing.** Page 2 of a
   three-page run was refused on every attempt, fell through to the parse,
@@ -384,7 +433,7 @@ found only by running the SECONDARY engines rather than just the primary one
   user agent out of `userAgent.userAgent`, locale `ur-PK` from
   `intl.contentLocale` (the fingerprint's OWN locale, not an invented
   `en-PK`), timezone `Asia/Karachi` from `intl.timeZone`, plus viewport and
-  device scale factor. Those are the exact four keys §16 records as having
+  device scale factor. Those are the exact four keys a family rule records as having
   been wrong in four sibling repos at once.
 * **Scraper API** — HTTP 200, 965,862 bytes, **48 of 48 products from a
   single request** at $0.0005. That is a far better result than the sibling
@@ -395,7 +444,7 @@ found only by running the SECONDARY engines rather than just the primary one
   within five minutes: no fingerprint served 48 rows on the first attempt
   twice, `--fp-country pk` was refused 4 of 4, and `--fp-country de` —
   matching the exit country exactly — was refused 4 of 4 as well. So it is
-  not the country mismatch §8 warns about; it is that an injected Windows
+  not the country mismatch a family rule warns about; it is that an injected Windows
   identity contradicts the real browser underneath it. The flag stays (it is
   the family's contract, and the product works elsewhere) and the README,
   TROUBLESHOOTING and this entry all say not to use it here.
@@ -430,7 +479,7 @@ found only by running the SECONDARY engines rather than just the primary one
   links. foodpanda has left Thailand. Left in `HOSTS` it would have fetched a
   competitor's page, classified it `blocked` — correctly, it is not built out
   of foodpanda's assets — and reported exit 3, sending the reader after a
-  proxy problem that does not exist (§5's `mediamarkt.lu` case).
+  proxy problem that does not exist (the family's `mediamarkt.lu` case).
 
 [0.2.1]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.1
 [0.2.0]: https://github.com/2scraper/foodpanda-scraper/releases/tag/v0.2.0

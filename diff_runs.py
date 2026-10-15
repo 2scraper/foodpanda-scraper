@@ -196,7 +196,7 @@ def diff_products(old: List[dict], new: List[dict],
         # on price. UNREACHABLE HERE and kept deliberately: `PRICE_FIELDS` is
         # empty, so the `any(...)` below is always False and this bucket is
         # always empty. It stays because the family's diff shape is part of
-        # the output contract (§9) — a consumer that reads `source_changed`
+        # the output contract — a consumer that reads `source_changed`
         # on four sibling repos should not have to special-case the fifth —
         # and because a future page kind on this site with a price on it
         # would want exactly this branch rather than a reinvention of it.
