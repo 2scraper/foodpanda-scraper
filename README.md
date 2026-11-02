@@ -1,4 +1,4 @@
-# foodpanda-scraper
+# foodpanda Scraper — Restaurant Listings, Ratings and Delivery Data in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/foodpanda-scraper?sort=semver)](https://github.com/2scraper/foodpanda-scraper/releases)
 [![tests](https://github.com/2scraper/foodpanda-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/foodpanda-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%C2%B7%20Selenium%20%C2%B7%20pyppeteer%20%C2%B7%20CDP-lightgrey)](#engines)
 [![runs without an account, from a residential IP](https://img.shields.io/badge/runs%20without%20an%20account-residential%20IP-brightgreen)](#do-i-need-to-buy-anything)
+
+**foodpanda scraper** — an open-source (MIT) Python tool that reads home, city and area pages on ten foodpanda country sites and writes one row per vendor — rating, review count, cuisines, deal labels, delivery data and whether it is open right now — to JSON or CSV. On 2026-09-15 a plain headful Chromium on a residential address was served by ten of the ten country sites, but refusals depend on the session and the moment, so runs rely on retries with a fresh browser and delays. Use it to build a dataset of restaurants and shops in an area, or compare two runs with the included diff tool.
 
 Scrapes **foodpanda vendor listings** — every restaurant and shop tile the
 site puts on a city, area or home page, with its rating, review count,
@@ -614,6 +616,23 @@ list:
   a container, so it runs headless.
 
 ---
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Givenchy Beauty scraper](https://github.com/2scraper/givenchy-scraper) — Products, prices and shades across 11 storefront locales
+- [Home Depot scraper](https://github.com/2scraper/homedepot-scraper) — Per-store prices, stock, brands, models and ratings…
+- [Indiegogo scraper](https://github.com/2scraper/indiegogo-scraper) — Project listings, campaign pages and reward tiers
+- [Kohl's scraper](https://github.com/2scraper/kohls-scraper) — Prices, price ranges, sale and clearance labels, ratings…
+- [Maison KOSÉ scraper](https://github.com/2scraper/kose-scraper) — Kosé's Japanese online store (maison.kose.co.jp)
+- [LG scraper](https://github.com/2scraper/lg-scraper) — Every model in an lg.com category
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
 
 ## Licence
 
