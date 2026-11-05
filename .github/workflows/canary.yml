@@ -44,7 +44,11 @@ name: canary
 # ON DEMAND ONLY — there is deliberately no `schedule:` here.
 #
 # A GitHub runner's datacentre address cannot reach this site without a paid
-# exit, so a schedule is only worth adding once a secret is configured.
+# exit, so a schedule is only worth adding once a dispatch on the configured
+# exit is green. The exit's COUNTRY matters: on 2026-11-05 a Scraping Browser
+# session with a US exit was served page 1 of this listing and then refused
+# page 2 with Cloudflare error 1005, a ban on the exit's network (ASN). Try
+# an exit in Pakistan for this foodpanda.pk listing.
 # Dispatched without one, the run is RED and says which secret is missing;
 # every outcome that did not test real rows (blocked, never reached the
 # site, zero rows) is red too.
@@ -153,7 +157,8 @@ jobs:
             0)
               echo "OK — rows parsed from a live run." ;;
             3)
-              echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. That is no longer just an access condition. Read the debug dump: it names PerimeterX or Cloudflare, and those mean different things. If a proxy is configured rather than the Scraping Browser, check it can drive a browser at all — see TROUBLESHOOTING.md on the 407 handshake."
+              echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. If the log says Cloudflare error 1005, the site bans the exit's network: try an exit in Pakistan."
+              echo "::error:: That is no longer just an access condition. Read the debug dump: it names PerimeterX or Cloudflare, and those mean different things. If a proxy is configured rather than the Scraping Browser, check it can drive a browser at all — see TROUBLESHOOTING.md on the 407 handshake."
               exit 1 ;;
             6)
               # Rows WERE gathered, so the data checks below still run on

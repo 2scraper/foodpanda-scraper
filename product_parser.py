@@ -565,7 +565,35 @@ CLOUDFLARE_MARKERS: Tuple[str, ...] = (
     "challenges.cloudflare.com",
     "__cf_chl",
     "Just a moment...",
+    # Cloudflare's 1xxx error document ("Access denied | ... used Cloudflare
+    # to restrict access"). Measured 2026-11-05 through a Scraping Browser
+    # session: Error 1005, the site banning the exit's whole network (ASN).
+    # Zero occurrences on every served capture.
+    "cf-error-details",
 )
+
+# Cloudflare's 1xxx error page states its own code and, for 1005, the
+# network that was banned. Read both, because "this ASN is banned" wants a
+# different exit while a managed challenge wants a browser or a solve.
+_CF_ERROR_CODE_RE = re.compile(
+    r'data-translate="error">\s*Error\s*</span>\s*<span>\s*(\d{4})\s*</span>')
+_CF_BANNED_ASN_RE = re.compile(
+    r"autonomous system number \(ASN\) your IP address is in \((\d+)\)")
+
+
+def cloudflare_access_denied(html: str) -> Optional[Tuple[str, Optional[str]]]:
+    """(error code, banned ASN or None) for Cloudflare's 1xxx error page, else None.
+
+    This is NOT the managed challenge: there is no widget to solve and a
+    fresh session from the same network gets the same answer. Error 1005
+    means the site bans the exit's ASN.
+    """
+    text = html or ""
+    if "cf-error-details" not in text:
+        return None
+    code = _CF_ERROR_CODE_RE.search(text)
+    asn = _CF_BANNED_ASN_RE.search(text)
+    return (code.group(1) if code else "1xxx", asn.group(1) if asn else None)
 
 # What this repo can actually pay to have solved.
 #
