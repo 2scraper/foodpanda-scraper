@@ -532,6 +532,89 @@ class _BrowserSession:
             logger.debug("Ignoring error during browser teardown: %s", e)
 
 
+class _ManagedSolve:
+    """What the Scraping Browser's own solver is doing on the current page.
+
+    Fed by the `Captcha.*` CDP events. Measured 2026-11-05: the remote
+    browser reported a challenge and sent it for solving, and this engine
+    re-navigated a second later because the interstitial looked like a
+    refusal, abandoning the solve. A page under an auto-solve is judged once
+    the solve has settled, not from the interstitial.
+    """
+
+    def __init__(self):
+        self.enabled = False
+        self.reset()
+
+    def reset(self):
+        self.detected = self.finished = self.failed = 0
+
+    def pending(self) -> bool:
+        return self.detected > self.finished + self.failed
+
+    def on_detected(self, *_):
+        self.detected += 1
+        logger.info("[Scraping Browser] CAPTCHA detected on page.")
+
+    def on_finished(self, *_):
+        self.finished += 1
+        logger.info("[Scraping Browser] CAPTCHA solved automatically.")
+
+    def on_failed(self, *_):
+        self.failed += 1
+        logger.warning("[Scraping Browser] CAPTCHA auto-solve failed.")
+
+
+# How long to wait for the remote solver to SAY it has seen a challenge on a
+# page that looks refused, and how long to let a solve it started run. The
+# second is generous because a reCAPTCHA solve can take about a minute.
+MANAGED_SOLVE_NOTICE_MS = 10_000
+MANAGED_SOLVE_TIMEOUT_MS = 180_000
+
+
+def _await_managed_solve(page, notice_ms: int = MANAGED_SOLVE_NOTICE_MS,
+                         timeout_ms: int = MANAGED_SOLVE_TIMEOUT_MS):
+    """Let the Scraping Browser finish a solve before the page is judged.
+
+    Returns None when no auto-solve is running on this page (nothing waited
+    beyond `notice_ms`), else "finished", "failed" or "timeout". Waits with
+    the page's own timer, which is also what delivers the CDP events.
+    """
+    managed = getattr(page, "_managed_solve", None)
+    if managed is None or not managed.enabled:
+        return None
+    waited = 0
+    while not managed.pending() and managed.finished == 0 \
+            and managed.failed == 0 and waited < notice_ms:
+        page.wait_for_timeout(500)
+        waited += 500
+    if not managed.pending():
+        if managed.finished or managed.failed:
+            # Settled while we were noticing it; let its reload land.
+            page.wait_for_timeout(2000)
+            return "finished" if managed.finished else "failed"
+        return None
+    logger.info("The Scraping Browser is solving a challenge on this page — "
+                "waiting up to %.0fs for it to settle before judging the "
+                "page.", timeout_ms / 1000)
+    waited = 0
+    while managed.pending() and waited < timeout_ms:
+        page.wait_for_timeout(1000)
+        waited += 1000
+    if managed.pending():
+        logger.warning("The Scraping Browser's solve had not settled after "
+                       "%.0fs; judging the page as it stands.",
+                       timeout_ms / 1000)
+        return "timeout"
+    # The solve submits and the page reloads itself; give that a moment.
+    page.wait_for_timeout(2000)
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=30000)
+    except (PWTimeout, PWError):
+        pass
+    return "finished" if managed.finished else "failed"
+
+
 def _connect_remote(pw, args):
     """Attach to an already-running browser over CDP; return (browser, context, page)."""
     logger.info("Connecting to existing browser over CDP: %s",
@@ -586,13 +669,16 @@ def _connect_remote(pw, args):
     # nothing in this repo pays for one. What the Scraping Browser DOES buy
     # is measured and large — three pages, 144 vendors, zero refusals, 29
     # seconds, against five attempts and seven minutes unproxied.
+    managed = _ManagedSolve()
+    page._managed_solve = managed
     try:
         cdp_session = context.new_cdp_session(page)
         cdp_session.send("Captcha.setAutoSolve", {"autoSolve": True, "options": [{"type": "*"}]})
-        cdp_session.on("Captcha.detected", lambda *_: logger.info("[Scraping Browser] CAPTCHA detected on page."))
+        cdp_session.on("Captcha.detected", managed.on_detected)
         cdp_session.on("Captcha.waitForSolve", lambda *_: logger.info("[Scraping Browser] CAPTCHA sent to 2captcha for solving."))
-        cdp_session.on("Captcha.solveFinished", lambda *_: logger.info("[Scraping Browser] CAPTCHA solved automatically."))
-        cdp_session.on("Captcha.solveFailed", lambda *_: logger.warning("[Scraping Browser] CAPTCHA auto-solve failed."))
+        cdp_session.on("Captcha.solveFinished", managed.on_finished)
+        cdp_session.on("Captcha.solveFailed", managed.on_failed)
+        managed.enabled = True
         logger.info("Scraping Browser API Captcha.setAutoSolve enabled — supported "
                     "challenge types will be solved automatically if this "
                     "--cdp-endpoint is a Scraping Browser API session.")
@@ -863,6 +949,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         load_failed, exit_failed = False, None
         status = None
         for attempt in range(1, args.retries + 1):
+            managed = getattr(session.page, "_managed_solve", None)
+            if managed is not None:
+                managed.reset()
             try:
                 response = session.page.goto(url, wait_until="domcontentloaded",
                                              timeout=60000)
@@ -884,6 +973,17 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                     exit_failed = reason
                     load_failed = True
                     break  # a different exit is the only thing that helps
+                # The Scraping Browser's solver can navigate the page under
+                # goto(), which then raises. Navigating again would abandon
+                # the solve, so let it settle and judge what it left.
+                if managed is not None and managed.pending():
+                    settled = _await_managed_solve(session.page, notice_ms=0)
+                    logger.info("Navigation was interrupted by the Scraping "
+                                "Browser's own solve (%s); judging the page "
+                                "it left rather than navigating again.",
+                                settled)
+                    status, load_failed = None, False
+                    break
                 load_failed = True
                 if attempt < args.retries:
                     pause = args.retry_delay * (2 ** (attempt - 1))
@@ -901,6 +1001,17 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             continue
         if load_failed:
             break
+
+        # Over the Scraping Browser a refusal-looking page may be a
+        # challenge the remote browser is already solving. Judge it after
+        # that solve settles; neither buy a second solve nor re-navigate
+        # while it runs.
+        if managed is not None and managed.enabled:
+            first = _content_when_settled(session.page) or ""
+            if _classify(session.page, first, status) in ("challenge",
+                                                          "blocked"):
+                if _await_managed_solve(session.page) is not None:
+                    status = None
 
         if handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
@@ -1049,6 +1160,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             page_flow.block_advice(html, headless=args.headless,
                                    has_pool=has_pool),
             (f" Tried {block_retries + 1} exit(s)." if has_pool
+             else f" Fetched {block_retries + 1} time(s) through the same "
+                  f"Scraping Browser profile." if args.cdp_endpoint
              else f" Re-fetched {block_retries + 1} time(s) with a fresh "
                   f"browser each time."))
         outcome.blocked_by = (page_flow.detect_block_marker(html or "")

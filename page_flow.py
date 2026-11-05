@@ -84,7 +84,7 @@ from typing import Callable, Dict, List, Optional
 from urllib.parse import urlsplit
 
 from product_parser import (SELECTORS, NEXT_PAGE_SELECTOR, PAGE_CAP,
-                            unsolvable_challenge,
+                            unsolvable_challenge, cloudflare_access_denied,
                             TYPICAL_PAGE_SIZE, THIN_PAGE_FLOOR,
                             detect_block_marker, detect_bot_challenge,
                             detect_page_state, listing_kind, page_of_url,
@@ -385,6 +385,19 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     proxy they did not need.
     """
     marker = detect_block_marker(html or "")
+    denied = cloudflare_access_denied(html or "")
+    if denied:
+        code, asn = denied
+        banned = (f"the site bans the exit's network, ASN {asn}" if asn
+                  else "the site refuses the exit's address or network")
+        return (
+            f"blocked (Cloudflare error {code}: {banned}). This is not a "
+            f"challenge: there is nothing on it to solve, so --solve-captcha "
+            f"does not help, and a retry only helps if it leaves from a "
+            f"different network. Use an exit in another network, preferably "
+            f"in the site's own country (measured 2026-11-05: a Scraping "
+            f"Browser session with a US exit was served page 1, then got "
+            f"error 1005 for ASN 11426 on every retry of page 2).")
     if marker == "Cloudflare":
         return (
             "blocked (Cloudflare's managed challenge). Every non-browser "

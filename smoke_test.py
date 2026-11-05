@@ -86,6 +86,7 @@ from product_parser import (BOT_CHALLENGE_MARKERS, BLOCK_MARKERS,
                             SELECTORS, THIN_PAGE_FLOOR, TYPICAL_PAGE_SIZE,
                             UNSOLVABLE_CHALLENGE_MARKERS,
                             SOLVABLE_PRODUCTS, city_area_from_url,
+                            cloudflare_access_denied,
                             currency_in, detect_block_marker,
                             detect_bot_challenge, detect_page_state, int_in,
                             is_no_results, is_supported_host,
@@ -2899,6 +2900,113 @@ def test_numeric_flags_reject_negative_values():
     return ok
 
 
+# Cut from the page a Scraping Browser session (US exit) got for page 2 of
+# the canary listing on 2026-11-05, with the Ray ID and the exit's IP
+# removed. Structure kept: the error-details block, the code and the ASN
+# sentence are what the detector reads.
+CLOUDFLARE_1005 = """<!DOCTYPE html><html class="no-js" lang="en-US"><head>
+<title>Access denied | www.foodpanda.pk used Cloudflare to restrict access</title>
+<link rel="stylesheet" id="cf_styles-css" href="/cdn-cgi/styles/main.css">
+</head><body><div id="cf-wrapper">
+<div id="cf-error-details" class="p-0">
+  <header class="mx-auto pt-10">
+    <h1 class="inline-block md:block mr-2 md:mb-2 font-light">
+      <span data-translate="error">Error</span>
+      <span>1005</span>
+    </h1>
+    <h2 class="text-gray-600">Access denied</h2>
+  </header>
+  <section class="w-240 lg:w-full mx-auto mb-8 lg:px-8">
+    <div class="clearfix"><div class="w-1/2 md:w-full float-left pr-6">
+      <h2 class="text-3xl leading-tight font-normal mb-4">What happened?</h2>
+      <p>The owner of this website (www.foodpanda.pk) has banned the autonomous system number (ASN) your IP address is in (11426) from accessing this website.</p>
+    </div></div>
+  </section>
+</div></div></body></html>"""
+
+
+def test_cloudflare_access_denied():
+    group("Cloudflare's 1xxx error page is a network ban, not a challenge")
+    ok = True
+    html = CLOUDFLARE_1005
+    ok &= check("1005 is recognised with its banned ASN",
+                cloudflare_access_denied(html) == ("1005", "11426"))
+    ok &= check("1005 is blocked, not challenge or shell",
+                detect_page_state(html, 403) == "blocked"
+                and detect_page_state(html, None) == "blocked")
+    ok &= check("1005 names Cloudflare as the vendor",
+                detect_block_marker(html) == "Cloudflare")
+    for name in LISTING_FIXTURES + INDEX_FIXTURES + BLOCK_FIXTURES:
+        ok &= check(f"{name} is not read as a 1xxx error page",
+                    cloudflare_access_denied(html_of(name)) is None)
+    advice = page_flow.block_advice(html, headless=False, has_pool=False)
+    ok &= check("the advice names the error and the ASN",
+                "1005" in advice and "11426" in advice)
+    ok &= check("the advice does not offer a solve or the managed-challenge "
+                "text", "Turnstile" not in advice
+                and "managed challenge" not in advice)
+    ok &= check("the advice does not call it per-session",
+                "per-session" not in advice)
+    return ok
+
+
+def test_scraping_browser_solve_is_awaited(skips):
+    group("A Scraping Browser solve is judged after it settles")
+    ok = True
+    try:
+        import playwright_scraper as engine
+    except ImportError as exc:
+        skips.append(f"playwright_scraper (managed solve): {exc}")
+        return ok
+
+    class _FakePage:
+        """Its timer delivers the CDP events, like Playwright's does."""
+
+        def __init__(self, managed, script):
+            self._managed_solve = managed
+            self.script = list(script)   # (at_ms, event) pairs
+            self.clock = 0
+
+        def wait_for_timeout(self, ms):
+            self.clock += ms
+            while self.script and self.script[0][0] <= self.clock:
+                getattr(self._managed_solve, self.script.pop(0)[1])()
+
+        def wait_for_load_state(self, *a, **kw):
+            pass
+
+    def run(script, **kw):
+        managed = engine._ManagedSolve()
+        managed.enabled = True
+        page = _FakePage(managed, script)
+        return engine._await_managed_solve(page, **kw), page.clock
+
+    got, clock = run([(1500, "on_detected"), (40000, "on_finished")])
+    ok &= check("a solve noticed late is waited for until it finishes",
+                got == "finished" and clock >= 40000)
+    got, clock = run([(0, "on_detected"), (30000, "on_failed")])
+    ok &= check("a failed solve is reported as failed", got == "failed")
+    got, clock = run([])
+    ok &= check("no solve: only the notice window is spent",
+                got is None and clock == engine.MANAGED_SOLVE_NOTICE_MS)
+    got, clock = run([(0, "on_detected")], timeout_ms=5000)
+    ok &= check("a solve that never settles is bounded", got == "timeout")
+    managed = engine._ManagedSolve()   # not a Scraping Browser
+    page = _FakePage(managed, [(0, "on_detected")])
+    ok &= check("a local browser never waits",
+                engine._await_managed_solve(page) is None and page.clock == 0)
+
+    # The fetch loop must CALL it, both after a navigation that the solve
+    # interrupted and before judging a refusal-looking page.
+    src = inspect.getsource(engine._fetch_one_page)
+    ok &= check("_fetch_one_page waits for the remote solve",
+                src.count("_await_managed_solve(") >= 2)
+    ok &= check("the solve's own events feed the tracker",
+                "managed.on_detected" in inspect.getsource(engine._connect_remote)
+                and "managed.on_finished" in inspect.getsource(engine._connect_remote))
+    return ok
+
+
 def main() -> int:
     ok = True
     skips = []
@@ -2928,6 +3036,8 @@ def main() -> int:
     ok &= test_proxy_pool_and_credentials()
     ok &= test_engine_parity(skips)
     ok &= test_concurrency_machinery(skips)
+    ok &= test_cloudflare_access_denied()
+    ok &= test_scraping_browser_solve_is_awaited(skips)
     ok &= test_audit_budget_delay_scope(skips)
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()

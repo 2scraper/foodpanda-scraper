@@ -591,7 +591,10 @@ happened, that `(page, position)` is unique, that an area row carries no
 delivery data. It is **dispatch-only, with no schedule**: nothing here runs
 live on its own, and the `canary` badge shows the last dispatch. Point it at a
 `FOODPANDA_CDP_ENDPOINT` or `FOODPANDA_PROXY` secret and run it by hand when
-you want that check. Without one it fails with an error naming the missing
+you want that check. The exit's country matters: the canary reads
+foodpanda.pk, and on 2026-11-05 a Scraping Browser session with a US exit was
+served page 1 and then refused page 2 with Cloudflare error 1005, a ban on
+the exit's network. An exit in Pakistan is the one to try. Without one it fails with an error naming the missing
 secret, because a run that never reached the site has tested nothing.
 
 ---

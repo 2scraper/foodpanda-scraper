@@ -13,6 +13,29 @@ or from a half-empty output file.
 
 ## [Unreleased]
 
+### Fixed
+
+* **A Scraping Browser solve is no longer abandoned.** With
+  `--cdp-endpoint`, the remote browser can be solving a challenge while the
+  page still looks refused. The Playwright engine re-navigated about a
+  second after the solve started (measured 2026-11-05). It now waits for the
+  solve to report finished or failed, up to 180 s, and judges the page it
+  leaves; it does not buy a second solve or navigate again in the meantime.
+* **Cloudflare error 1005 is named for what it is.** The exit-3 message
+  for Cloudflare's "Access denied" page said the refusal was per-session and
+  would clear with retries. Error 1005 is a ban on the exit's network (ASN):
+  the message now gives the code and the ASN and says to use an exit in
+  another network. The page is recorded as `blocked_Cloudflare`.
+* The exit-3 message no longer says a Scraping Browser run used a fresh
+  browser for each attempt; it reuses one profile.
+
+### Changed
+
+* The canary documentation says which exit country it needs: a US exit was
+  refused with error 1005 on foodpanda.pk on 2026-11-05. The canary stays
+  dispatch-only; no schedule is added until a dispatch on the configured
+  exit is green.
+
 ## [0.3.0] — 2026-10-15
 
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used

@@ -123,6 +123,21 @@ launches a fresh browser each attempt.
 
 ---
 
+## "Access denied | www.foodpanda.pk used Cloudflare to restrict access" (Error 1005)
+
+This is **not** a challenge. Cloudflare's error 1005 means the site bans the
+whole network (the ASN) your exit belongs to; the page states the ASN. There
+is nothing on it to solve, and a new session from the same network gets the
+same page, so neither `--solve-captcha` nor `--retries` changes it. The
+engine names the error and the ASN in its exit-3 message.
+
+Use an exit in a different network, preferably in the country of the site
+you are reading. Measured 2026-11-05: a Scraping Browser session with a US
+exit was served page 1 of a foodpanda.pk listing, then got error 1005 (a US
+residential ISP's ASN) on every retry of page 2.
+
+---
+
 ## A run reported `complete` but I only got one page
 
 It should not any more — this was a real bug, found by this repo's first live
@@ -370,6 +385,12 @@ The engine names both causes because they want opposite responses:
 |---|---|---|
 | HTTP 500 | the profile is BUSY — one live connection per `pid`, and another run holds it | wait, or use a different `pid` |
 | HTTP 401, `deny_no_user` | the profile is GONE | get new credentials |
+
+When the Scraping Browser solves a challenge itself (`Captcha.setAutoSolve`,
+switched on by this engine), the page it lands on first is the challenge.
+The Playwright engine waits for the remote solve to report finished or
+failed (up to 180 s) before it judges the page, rather than navigating
+again and abandoning the solve.
 
 The canary reports that as a FAILURE (exit 5, "the content was never
 obtained") with the cause named: an expired secret says nothing about the
