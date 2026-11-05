@@ -29,12 +29,19 @@ or from a half-empty output file.
 * The exit-3 message no longer says a Scraping Browser run used a fresh
   browser for each attempt; it reuses one profile.
 
+* **The canary rejected a correct `3000+` review count.** Its data check
+  accepted only a fixed list of caps (100, 500, 1000, 2000, 5000). On
+  2026-11-05 the site printed `3000+` on four vendors, the parser flagged
+  them correctly, and the check failed a run that was otherwise complete.
+  It now requires a floored count to be a round hundred.
+
 ### Changed
 
-* The canary documentation says which exit country it needs: a US exit was
-  refused with error 1005 on foodpanda.pk on 2026-11-05. The canary stays
-  dispatch-only; no schedule is added until a dispatch on the configured
-  exit is green.
+* The canary documentation says that the exit's network matters. On
+  2026-11-05, one dispatch with a US Scraping Browser exit was refused with
+  error 1005 on page 2. A second dispatch on the same secret was served all
+  three pages. The canary stays dispatch-only, and no schedule is added until
+  a dispatch on the configured exit is green.
 
 ## [0.3.0] — 2026-10-15
 

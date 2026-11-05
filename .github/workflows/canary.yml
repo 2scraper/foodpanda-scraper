@@ -45,10 +45,11 @@ name: canary
 #
 # A GitHub runner's datacentre address cannot reach this site without a paid
 # exit, so a schedule is only worth adding once a dispatch on the configured
-# exit is green. The exit's COUNTRY matters: on 2026-11-05 a Scraping Browser
+# exit is green. The exit's NETWORK matters: on 2026-11-05 a Scraping Browser
 # session with a US exit was served page 1 of this listing and then refused
-# page 2 with Cloudflare error 1005, a ban on the exit's network (ASN). Try
-# an exit in Pakistan for this foodpanda.pk listing.
+# page 2 with Cloudflare error 1005, a ban on the exit's network (ASN); a
+# second dispatch on the same secret ~15 minutes later was served all three
+# pages. An exit in Pakistan has not been tested.
 # Dispatched without one, the run is RED and says which secret is missing;
 # every outcome that did not test real rows (blocked, never reached the
 # site, zero rows) is red too.
@@ -157,7 +158,7 @@ jobs:
             0)
               echo "OK — rows parsed from a live run." ;;
             3)
-              echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. If the log says Cloudflare error 1005, the site bans the exit's network: try an exit in Pakistan."
+              echo "::error::Blocked (exit 3) WITH a paid exit in play, on every attempt of every page. If the log says Cloudflare error 1005, the site bans the exit's network: re-run, or use an exit in another network (Pakistan, the site's own country, has not been tested)."
               echo "::error:: That is no longer just an access condition. Read the debug dump: it names PerimeterX or Cloudflare, and those mean different things. If a proxy is configured rather than the Scraping Browser, check it can drive a browser at all — see TROUBLESHOOTING.md on the 407 handshake."
               exit 1 ;;
             6)
@@ -269,13 +270,17 @@ jobs:
                           f"(measured 69-78% on this listing)")
 
           # A review count that is the site's CAP must say so, or a monitor
-          # reads 100+ as 100 forever.
+          # reads 100+ as 100 forever. The caps are round hundreds, and the
+          # set is the site's, not ours: 2026-11-05 showed 100, 500, 1000,
+          # 2000, 3000 and 5000. A fixed list of them failed a correct parse
+          # on the first "3000+", so this asserts the shape instead.
           floored = [r for r in rows if r.get("review_count_is_floor")]
           for r in floored:
-              if r.get("review_count") not in (100, 500, 1000, 2000, 5000):
+              n = r.get("review_count")
+              if not (isinstance(n, int) and n >= 100 and n % 100 == 0):
                   fail.append(f"{r.get('sku')} is flagged as a floored review "
-                              f"count but reads {r.get('review_count')}, which "
-                              f"is not one of the site's caps")
+                              f"count but reads {n}, which is not a round "
+                              f"hundred like the site's caps")
                   break
 
           # A discount that says "Up to" is a CEILING, and the flag is the

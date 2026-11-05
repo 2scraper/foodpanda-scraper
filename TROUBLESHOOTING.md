@@ -134,7 +134,9 @@ engine names the error and the ASN in its exit-3 message.
 Use an exit in a different network, preferably in the country of the site
 you are reading. Measured 2026-11-05: a Scraping Browser session with a US
 exit was served page 1 of a foodpanda.pk listing, then got error 1005 (a US
-residential ISP's ASN) on every retry of page 2.
+residential ISP's ASN) on every retry of page 2. A second run on the same
+endpoint about fifteen minutes later was served all three pages, so whether
+you hit a banned network depends on which network the exit lands in.
 
 ---
 
