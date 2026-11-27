@@ -37,6 +37,8 @@ or from a half-empty output file.
 
 ### Changed
 
+- CI only: the offline-checks job runs on `ubuntu-24.04` instead of `ubuntu-latest`, which moved to Ubuntu 26.04, where `actions/setup-python` has no Python 3.9 build. 3.9 stays the supported floor.
+- Docker: the image installs `libatomic1` before Playwright. Recent Playwright releases' Node driver needs it to run `playwright install` at all, and the slim base image does not ship it, so the image build failed.
 * The canary documentation says that the exit's network matters. On
   2026-11-05, one dispatch with a US Scraping Browser exit was refused with
   error 1005 on page 2. A second dispatch on the same secret was served all
