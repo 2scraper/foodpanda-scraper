@@ -16,6 +16,14 @@ WORKDIR /app
 
 COPY requirements.txt requirements-playwright.txt ./
 
+# libatomic1 first: Playwright's bundled Node driver needs it just to run
+# `playwright install`, i.e. before that command can install any system
+# dependency itself (the slim base image does not ship it; the build
+# failed with "libatomic.so.1: cannot open shared object file").
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # `playwright install chromium` is enough for this site, unlike one sibling
 # repo where the bundled build is refused and real Chrome is required.
 # Measured 2026-09-15: Playwright's own Chromium was served by ten of the
